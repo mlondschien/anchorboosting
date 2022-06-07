@@ -1,10 +1,9 @@
 import numpy as np
 
 
-def simulate(f, shift=0, seed=0):
+def simulate(f, n=1000, shift=0, seed=0):
     rng = np.random.RandomState(seed)
 
-    n = 10000
     a = rng.normal(size=(n, 2)) + shift
     h = rng.normal(size=(n, 1))
     x_noise = 0.5 * rng.normal(size=(n, 10))
