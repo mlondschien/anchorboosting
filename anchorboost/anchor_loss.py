@@ -13,12 +13,12 @@ class AnchorMixin:
         residuals = self.residuals(f, y)
         return residuals ** 2 + (self.gamma - 1) * self._proj(anchor, residuals) ** 2
 
-    def anchor_objective(self, f, data):
+    def objective(self, f, data):
         y = data.get_label()
         anchor = data.anchor
         return self.grad(f, y, anchor), self.hess(f, y, anchor)
 
-    def anchor_score(self, f, data):
+    def score(self, f, data):
         y = data.get_label()
         anchor = data.anchor
         return self.name, self.loss(f, y, anchor).mean(), self.higher_is_better
@@ -33,7 +33,7 @@ class AnchorMixin:
         return np.dot(np.dot(a, np.linalg.inv(a.T @ a)), a.T)
 
     def hess(self, f, y, anchor):
-        return 2 * np.ones(len(y))
+        return 2 * np.ones(f.size)
 
 
 class AnchorRegressionLoss(AnchorMixin):
@@ -69,9 +69,21 @@ class AnchorClassificationLoss(AnchorMixin):
         assert (sorted(unique_values) == unique_values).all()
         return np.array([counts / sum(unique_counts) for counts in unique_counts])
 
+    def objective(self, f, data):
+        y = data.get_label()
+        f = np.reshape(f, (len(y), -1))
+        anchor = data.anchor
+        return self.grad(f, y, anchor).flatten("C"), self.hess(f, y, anchor)
+
+    def score(self, f, data):
+        y = data.get_label()
+        f = np.reshape(f, (len(y), -1))
+        anchor = data.anchor
+        return self.name, self.loss(f, y, anchor).mean(), True
+
     def loss(self, f, y, anchor):
         residuals = self.residuals(f, y)
-        return self.likelihood(f, y) + (self.gamma - 1) * np.sum(
+        return self.negative_log_likelihood(f, y) + (self.gamma - 1) * np.sum(
             self._proj(anchor, residuals) ** 2, axis=1
         )
 
@@ -91,7 +103,7 @@ class AnchorClassificationLoss(AnchorMixin):
         return residuals
 
     def grad(self, f, y, anchor):
-        f = f - np.max(f)  # normalize f to avoid overflow
+        f = f - np.max(f, axis=1)[:, np.newaxis]  # normalize f to avoid overflow
         divisor = np.sum(np.exp(f), axis=1)
         predictions = np.exp(f) / divisor[:, np.newaxis]
         residuals = self.residuals(f, y)
@@ -100,13 +112,13 @@ class AnchorClassificationLoss(AnchorMixin):
             -np.sum(predictions * projected_residuals, axis=1)[:, np.newaxis]
             + projected_residuals
         )
-        return -2 * residuals + 2 * (self.gamma - 1) * grad
+        return +2 * residuals + 2 * (self.gamma - 1) * grad
 
     def _indices(self, y, n_classes):
-        return (np.arange(len(y)), y)
+        return (np.arange(len(y)), y.astype(int))
 
-    def likelihood(self, f, y):
+    def negative_log_likelihood(self, f, y):
         f = f - np.max(f)
-        divisor = np.sum(np.exp(f), axis=1)
         indices = self._indices(y, f.shape[1])
-        return np.exp(f[indices]) / divisor
+        log_divisor = np.log(np.sum(np.exp(f), axis=1))[:, np.newaxis]
+        return -f[indices] + log_divisor
