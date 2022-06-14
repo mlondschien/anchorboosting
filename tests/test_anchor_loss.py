@@ -11,7 +11,7 @@ def test_regression_grad(gamma):
     _, y, a = simulate(f2)
     rng = np.random.RandomState(0)
     f = rng.normal(size=len(y))
-    check_gradient(loss.loss, loss.grad, f, y, a, stepsize=0.1 / (1 + gamma))
+    check_gradient(loss.loss, loss.grad, f, y, a, stepsize=1 / (1 + gamma))
 
 
 @pytest.mark.parametrize("gamma", [0.1, 1, 2, 10, 100, 1000])
@@ -21,12 +21,12 @@ def test_classification_grad(gamma):
     y = (y >= 0).astype(np.int64) + (y >= 1).astype(np.int64)
     rng = np.random.RandomState(0)
     f = rng.normal(size=(len(y), len(loss.init_score(y))))
-    check_gradient(loss.loss, loss.grad, f, y, a, stepsize=0.1 / (1 + gamma))
+    check_gradient(loss.loss, loss.grad, f, y, a, stepsize=1 / (1 + gamma))
 
 
 def check_gradient(loss, grad, f, y, anchor, stepsize):
     before = loss(f, y, anchor).sum()
-    for i in range(1000):
+    for i in range(200):
         f = f - stepsize * grad(f, y, anchor)
         after = loss(f, y, anchor).sum()
         if not after - before <= 1e-14:
@@ -39,7 +39,7 @@ def check_gradient(loss, grad, f, y, anchor, stepsize):
 def test_indices():
     loss = AnchorClassificationLoss(1)
     y = np.array([1, 3, 2, 2])
-    indices = loss._indices(y, 5)
+    indices = loss._indices(y)
 
     array = np.zeros((4, 5))
     for i in range(4):
