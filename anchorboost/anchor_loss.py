@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.special import logsumexp
 
 
 class AnchorMixin:
@@ -11,28 +12,60 @@ class AnchorMixin:
 
     def loss(self, f, y, anchor):
         residuals = self.residuals(f, y)
+
+        if self.gamma == 1:
+            return residuals ** 2
+
         return residuals ** 2 + (self.gamma - 1) * self._proj(anchor, residuals) ** 2
 
     def objective(self, f, data):
+        """Objective function for LGBM."""
         y = data.get_label()
         anchor = data.anchor
         return self.grad(f, y, anchor), self.hess(f, y, anchor)
 
     def score(self, f, data):
+        """Score function for LGBM."""
         y = data.get_label()
         anchor = data.anchor
-        return self.name, self.loss(f, y, anchor).mean(), self.higher_is_better
+        return (
+            f"{self.name}_{self.gamma}",
+            self.loss(f, y, anchor).mean(),
+            self.higher_is_better,
+        )
 
     def _proj(self, anchor, f):
+        """Project f onto the subspace spanned by anchor.
+
+        Parameters
+        ----------
+        anchor: np.ndarray of dimension (n, d_anchor).
+            The anchor matrix. If d_anchor = 1 and entries are integer, assumed to be
+            categories.
+        f: np.ndarray of dimension (n, d_f).
+            The vector to project.
+
+        Returns
+        -------
+        np.ndarray of dimension (n, d_f).
+            Projection of f onto the subspace spanned by anchor.
+        """
         # Linear projection of f onto the column space of anchor.
+        if anchor.shape[1] == 1 and "int" in str(anchor.dtype):
+            projected_values = np.zeros(f.shape)
+            for unique_value in np.unique(anchor):
+                mask = anchor.flatten() == unique_value
+                projected_values[mask, :] = f[mask, :].mean(axis=0)
+            return projected_values
+
         return np.dot(anchor, np.linalg.lstsq(anchor, f, rcond=None)[0])
-        # return np.dot(self._proj_matrix(anchor), f)
 
     def _proj_matrix(self, a):
         assert a.shape[1] < a.shape[0]
         return np.dot(np.dot(a, np.linalg.inv(a.T @ a)), a.T)
 
     def hess(self, f, y, anchor):
+        """Trivial hessian."""
         return 2 * np.ones(f.size)
 
 
@@ -82,10 +115,14 @@ class AnchorClassificationLoss(AnchorMixin):
         return self.name, self.loss(f, y, anchor).mean(), True
 
     def loss(self, f, y, anchor):
+        if self.gamma == 1:
+            return self.negative_log_likelihood(f, y)
+
         residuals = self.residuals(f, y)
-        return self.negative_log_likelihood(f, y) + (self.gamma - 1) * np.sum(
+        loss = self.negative_log_likelihood(f, y) + (self.gamma - 1) * np.sum(
             self._proj(anchor, residuals) ** 2, axis=1
         )
+        return loss
 
     def predictions(self, f):
         f = f - np.max(f)  # normalize f to avoid overflow
@@ -120,5 +157,5 @@ class AnchorClassificationLoss(AnchorMixin):
     def negative_log_likelihood(self, f, y):
         f = f - np.max(f)
         indices = self._indices(y, f.shape[1])
-        log_divisor = np.log(np.sum(np.exp(f), axis=1))[:, np.newaxis]
+        log_divisor = logsumexp(f, axis=1)[:, np.newaxis]
         return -f[indices] + log_divisor
