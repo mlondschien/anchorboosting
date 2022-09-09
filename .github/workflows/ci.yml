@@ -1,0 +1,56 @@
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+name: CI
+
+jobs:
+
+  test:
+    name: Unittests - ${{ matrix.PYTHON_VERSION }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        PYTHON_VERSION: ["3.9"]
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.head_ref }}
+
+      - uses: conda-incubator/setup-miniconda@v2
+        with:
+          miniforge-variant: Mambaforge
+          use-mamba: true
+          python-version: ${{ matrix.PYTHON_VERSION }}
+          environment-file: environment.yml
+
+      - name: Run the unittests
+        shell: bash -x -l {0}
+        run: |
+          pip install --no-deps .
+          pytest tests
+
+
+  pre-commit-checks:
+    name: "Pre-commit checks - Python 3.9"
+    runs-on: ubuntu-latest
+  
+    steps:
+
+      - name: Checkout branch
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.head_ref }}
+  
+      - name: Install Python 3.9
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+
+      - name: Run pre-commit checks
+        uses: pre-commit/action@v2.0.0
