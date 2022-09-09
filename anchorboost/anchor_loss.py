@@ -50,7 +50,8 @@ class AnchorMixin:
         np.ndarray of dimension (n, d_f).
             Projection of f onto the subspace spanned by anchor.
         """
-        # Linear projection of f onto the column space of anchor.
+        # If anchor is categorical (i.e., corresponds to environments), the projection
+        # onto the anchor is just the environment-wise mean.
         if anchor.shape[1] == 1 and "int" in str(anchor.dtype):
             projected_values = np.zeros(f.shape)
             for unique_value in np.unique(anchor):
@@ -78,10 +79,6 @@ class AnchorRegressionLoss(AnchorMixin):
 
     def residuals(self, f, y):
         return y - f
-
-    def l2_loss(self, f, y):
-        residuals = self.residuals(f, y)
-        return residuals ** 2
 
     def grad(self, f, y, anchor):
         residuals = self.residuals(f, y)
@@ -135,7 +132,7 @@ class AnchorClassificationLoss(AnchorMixin):
         f = f - np.max(f)  # normalize f to avoid overflow
         divisor = np.sum(np.exp(f), axis=1)
         residuals = np.exp(f) / divisor[:, np.newaxis]
-        indices = self._indices(y, f.shape[1])
+        indices = self._indices(y)
         residuals[indices] -= 1
         return residuals
 
@@ -151,11 +148,11 @@ class AnchorClassificationLoss(AnchorMixin):
         )
         return +2 * residuals + 2 * (self.gamma - 1) * grad
 
-    def _indices(self, y, n_classes):
+    def _indices(self, y):
         return (np.arange(len(y)), y.astype(int))
 
     def negative_log_likelihood(self, f, y):
         f = f - np.max(f)
-        indices = self._indices(y, f.shape[1])
+        indices = self._indices(y)
         log_divisor = logsumexp(f, axis=1)[:, np.newaxis]
         return -f[indices] + log_divisor
