@@ -1,6 +1,6 @@
 import lightgbm as lgb
 
-from anchorboost.anchor_loss import AnchorL2Loss
+from anchorboost.anchor_loss import AnchorRegressionLoss
 from anchorboost.simulate import f1, simulate
 
 X_fit, y_fit, a_fit = simulate(f1, shift=0, seed=0)
@@ -16,7 +16,7 @@ val.anchor = a_val
 ood = lgb.Dataset(X_ood, y_ood, reference=fit)
 ood.anchor = a_ood
 
-anchor_loss = AnchorL2Loss(7)
+anchor_loss = AnchorRegressionLoss(7)
 
 model = lgb.train(
     params={"learning_rate": 0.01},
@@ -24,6 +24,6 @@ model = lgb.train(
     num_boost_round=400,
     valid_sets=(fit, val, ood),
     valid_names=("fit", "val", "ood"),
-    fobj=anchor_loss.anchor_objective,
-    feval=(anchor_loss.anchor_score, anchor_loss.l2_score, anchor_loss.quantile_score),
+    fobj=anchor_loss.objective,
+    feval=(anchor_loss.score),
 )

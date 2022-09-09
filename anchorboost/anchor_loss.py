@@ -14,9 +14,9 @@ class AnchorMixin:
         residuals = self.residuals(f, y)
 
         if self.gamma == 1:
-            return residuals ** 2
+            return residuals**2
 
-        return residuals ** 2 + (self.gamma - 1) * self._proj(anchor, residuals) ** 2
+        return residuals**2 + (self.gamma - 1) * self._proj(anchor, residuals) ** 2
 
     def objective(self, f, data):
         """Objective function for LGBM."""
