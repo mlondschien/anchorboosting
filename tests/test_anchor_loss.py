@@ -16,15 +16,32 @@ def test_regression_grad(gamma):
 
 @pytest.mark.parametrize("gamma", [0.1, 1, 2, 10, 100, 1000])
 def test_classification_grad(gamma):
-    loss = AnchorClassificationLoss(gamma)
+    loss = AnchorClassificationLoss(gamma, n_classes=3)
     _, y, a = simulate(f2)
     y = (y >= 0).astype(np.int64) + (y >= 1).astype(np.int64)
     rng = np.random.RandomState(0)
-    f = rng.normal(size=(len(y), len(loss.init_score(y))))
+    f = rng.normal(size=(len(y), loss.n_classes))
     check_gradient(loss.loss, loss.grad, f, y, a, stepsize=1 / (1 + gamma))
 
 
 def check_gradient(loss, grad, f, y, anchor, stepsize):
+    """Make sure that moving in the direction of the negative gradient reduces the loss.
+
+    Parameters
+    ----------
+    loss : callable
+        Loss function. Arguments are f, y, anchor.
+    grad : callable
+        Gradient function. Arguments are f, y, anchor.
+    f : array-like
+        Initial value of f.
+    y : array-like
+        Target values.
+    anchor : array-like
+        Anchor values.
+    stepsize : float
+        Step size for gradient descent.
+    """
     before = loss(f, y, anchor).sum()
     for i in range(200):
         f = f - stepsize * grad(f, y, anchor)
@@ -37,7 +54,7 @@ def check_gradient(loss, grad, f, y, anchor, stepsize):
 
 
 def test_indices():
-    loss = AnchorClassificationLoss(1)
+    loss = AnchorClassificationLoss(1, 3)
     y = np.array([1, 3, 2, 2])
     indices = loss._indices(y)
 
