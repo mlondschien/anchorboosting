@@ -47,11 +47,11 @@ minimizes the linear model's worst-case risk with respect to certain shift inter
 Motivated by [3], define residuals 
 $$r_{i, k} = \begin{cases}
 1 - p_{i, k} &  y_i = k \\
-- p_{i, k} &  y_i \neq k.
+- p_{i, k} &  y_i \neq k
 \end{cases}$$
-such that for all $i$ we have $\sum_{i, j} r_{i, j} = 0$.
+such that for all $i$ we have $\sum_{k} r_{i, k} = 0$.
 
-For some tuning parameter $\gamma$, we add the additional regularization term $\gamma \| \pi_A r \|_2^2$ to our optimization problem.
+For some tuning parameter $\gamma$, we add the regularization term $(\gamma - 1) \| \pi_A r \|_2^2$ to our optimization problem.
 
 $$
 \hat f = \underset{f}{\arg \min} \ \ell(f, Y) + (\gamma - 1) \|\pi_A r\|_2^2
@@ -61,39 +61,45 @@ This encourages uncorrelatedness between the residuals and the anchor and, hopef
 
 $$
 \frac{d}{d f_{i, k}} p_{i, j} = 
-\frac{d}{d f_{i, k}} \frac{\exp(f_j)}{\sum_l \exp(f_l)} =
+\frac{d}{d f_{i, k}} \frac{\exp(f_{i, j})}{\sum_l \exp(f_{i, l})} =
 \begin{cases}
-\frac{\exp(f_k)}{\sum_l \exp(f_l)} - \frac{\exp(f_k)^2}{(\sum_l \exp(f_l))^2} & j = k \\
- - \frac{\exp(f_k)\exp{(f_j)}}{(\sum_l \exp(f_l))^2} & j \neq k
+\frac{\exp(f_{i, k})}{\sum_l \exp(f_{i, l})} - \frac{\exp(f_{i, k})^2}{(\sum_l \exp(f_{i, l}))^2} & j = k \\
+ - \frac{\exp(f_{i, k})\exp{(f_{i, j})}}{(\sum_l \exp(f_{i, l}))^2} & j \neq k
 \end{cases}
 =
 \begin{cases}
-p_{i, j} (1 - p_{i, j}) & j = k \\
-p_{i, j} p_{i, k} & j \neq k
+p_{i, j} - p_{i, j}p_{i, k} & j = k \\
+- p_{i, j} p_{i, k} & j \neq k
 \end{cases}
 $$
 
-and
+Then, 
+$$\frac{d}{d f_{i, k}} \| \pi_A r\|_2^2 = 2 \pi_A r \cdot \left(\begin{cases}
+p_{i, j} - p_{i, j}p_{i, k} & j = k \\
+- p_{i, j} p_{i, k} & j \neq k
+\end{cases}\right)_{i=1, \ldots, n}^{j,k=1, \ldots K}
+= (\pi_A r)_{i, k} \ p_{i, k} - \sum_{l=1}^K (\pi_A r)_{i, l} \ p_{i, l}
+$$
+<!-- and
 
 $$
-\frac{d^2}{d^2 f_{i, k}} p_{i, j} =
+\frac{d^2}{d f_{i, k} d f_{i, l}} p_{i, j} =
 \begin{cases}
 (1 - 2 p_{i, j}) p_{i, j} (1 - p_{i, j}) & j = k \\
-p_{i, j}^2 p_{i, k} & i \neq k
+p_{i, j}^2 p_{i, k} & j \neq k
 \end{cases}
 $$
 
-such that
+ such that
 
 $$
 \frac{d}{d f_{i, k}} \|\pi_A r\|_2^2 = 2 \pi_A r \cdot \pi_A \frac{d}{d f_{i, k}}(p_{i, j})_{i, j}
 $$
 
-Furthermore, the (diagonal of the) Hessian is ???
-
+Furthermore, the (diagonal of the) Hessian is ??? 
 $$
 \frac{d^2}{d^2 f_{i, k}} \|\pi_A r\|_2^2 = 2 \pi_A
-$$
+$$ -->
 
 
 ## References
