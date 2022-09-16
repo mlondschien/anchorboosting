@@ -1,27 +1,58 @@
+import lightgbm as lgb
 import numpy as np
 import pytest
+from scipy.optimize import approx_fprime
 
 from anchorboost.anchor_loss import AnchorClassificationLoss, AnchorRegressionLoss
 from anchorboost.simulate import f2, simulate
 
 
+@pytest.mark.parametrize("gamma", [0, 0.1, 0.5, 1, 2, 10, 100, 1000])
+def test_objective_regression(gamma):
+    loss = AnchorRegressionLoss(gamma)
+    X, y, a = simulate(f2, n=100)
+    rng = np.random.RandomState(0)
+    f = rng.normal(size=len(y))
+    data = lgb.Dataset(X, y)
+    data.anchor = a
+    obj_approx = approx_fprime(f, lambda f_: len(y) * loss.score(f_, data)[1], 1e-6)
+    np.testing.assert_allclose(
+        0.5 * obj_approx, loss.objective(f, data)[0], rtol=1e-5, atol=2e-6
+    )
+
+
+@pytest.mark.parametrize("gamma", [0, 0.1, 0.5, 1, 2, 10, 100, 1000])
+def test_objective_classification(gamma):
+    loss = AnchorClassificationLoss(gamma, n_classes=3)
+    X, y, a = simulate(f2, n=10)
+    y = (y > 0).astype(int) + (y > 1).astype(int)
+    rng = np.random.RandomState(0)
+    f = rng.normal(size=3 * len(y))
+    data = lgb.Dataset(X, y)
+    data.anchor = a
+    obj_approx = approx_fprime(f, lambda f_: len(y) * loss.score(f_, data)[1], 1e-6)
+    np.testing.assert_allclose(
+        obj_approx, loss.objective(f, data)[0], rtol=1e-5, atol=1e-6
+    )
+
+
 @pytest.mark.parametrize("gamma", [0.1, 1, 2, 10, 100, 1000])
-def test_regression_grad(gamma):
+def test_grad_regression(gamma):
     loss = AnchorRegressionLoss(gamma)
     _, y, a = simulate(f2)
     rng = np.random.RandomState(0)
     f = rng.normal(size=len(y))
-    check_gradient(loss.loss, loss.grad, f, y, a, stepsize=1 / (1 + gamma))
+    check_gradient(loss.loss, loss.grad, f, y, a, stepsize=1 / (gamma + 1))
 
 
 @pytest.mark.parametrize("gamma", [0.1, 1, 2, 10, 100, 1000])
-def test_classification_grad(gamma):
+def test_grad_classification(gamma):
     loss = AnchorClassificationLoss(gamma, n_classes=3)
     _, y, a = simulate(f2)
     y = (y >= 0).astype(np.int64) + (y >= 1).astype(np.int64)
     rng = np.random.RandomState(0)
     f = rng.normal(size=(len(y), loss.n_classes))
-    check_gradient(loss.loss, loss.grad, f, y, a, stepsize=1 / (1 + gamma))
+    check_gradient(loss.loss, loss.grad, f, y, a, stepsize=1 / (gamma + 1))
 
 
 def check_gradient(loss, grad, f, y, anchor, stepsize):
@@ -53,44 +84,45 @@ def check_gradient(loss, grad, f, y, anchor, stepsize):
         before = after
 
 
-def test_indices():
-    loss = AnchorClassificationLoss(1, 3)
-    y = np.array([1, 3, 2, 2])
+@pytest.mark.parametrize("y", [[0, 1, 3, 2, 2], [1, 1, 1, 0, 1]])
+def test_indices(y):
+    n_unique = len(np.unique(y))
+    loss = AnchorClassificationLoss(1, n_unique)
+    y = np.array(y)
     indices = loss._indices(y)
 
-    array = np.zeros((4, 5))
-    for i in range(4):
+    array = np.zeros((len(y), n_unique))
+    for i in range(len(y)):
         array[i, y[i]] = i
 
-    np.testing.assert_equal(array[indices], np.arange(4))
+    np.testing.assert_equal(array[indices], np.arange(len(y)))
 
 
 @pytest.mark.parametrize(
-    "anchor, residuals, result",
+    "y, f",
     [
-        (
-            np.array([[0.0, 1.0], [0.0, 1.0], [1.0, 0]]),
-            np.array([[1], [2], [3]]),
-            np.array([[1.5], [1.5], [3]]),
-        ),
-        (
-            np.array([[2], [2], [1], [3]]),
-            np.array([[1], [2], [3], [1]]),
-            np.array([[1.5], [1.5], [3], [1]]),
-        ),
-        (
-            np.array([[1.0], [1.0], [0.0]]),
-            np.array([[1, 2], [0, 2], [3, 4]]),
-            np.array([[0.5, 2.0], [0.5, 2.0], [0.0, 0.0]]),
-        ),
-        (
-            np.array([[2], [2], [1]]),
-            np.array([[1, 2], [0, 2], [3, 4]]),
-            np.array([[0.5, 2.0], [0.5, 2.0], [3.0, 4.0]]),
-        ),
-        (np.array([[0.0]]), np.array([[1]]), np.array([[0]])),
+        ([0, 1, 2, 2], [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]]),
+        ([0, 1], [[0, 0], [0, 0]]),
     ],
 )
-def test_proj(anchor, residuals, result):
-    loss = AnchorRegressionLoss(1)
-    np.testing.assert_almost_equal(loss._proj(anchor, residuals), result)
+def test_negative_log_likelihood_classification(y, f):
+    loss = AnchorClassificationLoss(1, len(np.unique(y)))
+    y = np.array(y)
+    f = np.array(f)
+
+    np.testing.assert_almost_equal(
+        -loss.negative_log_likelihood(f, y),
+        np.log(loss.predictions(f)[loss._indices(y)]),
+    )
+
+
+@pytest.mark.parametrize(
+    "y", [[0, 1, 2, 2], [0, 1], [0, 1, 2, 3, 4, 5, 1, 1, 1, 2, 3, 5]]
+)
+def test_init_scores_classification(y):
+    unique_values, unique_counts = np.unique(y, return_counts=True)
+    expected = np.tile(np.array(unique_counts) / np.sum(unique_counts), (len(y), 1))
+    loss = AnchorClassificationLoss(1, len(unique_values))
+    init_scores = loss.init_score(y).reshape(len(y), -1, order="F")
+    predictions = loss.predictions(init_scores)
+    np.testing.assert_almost_equal(predictions, expected)
