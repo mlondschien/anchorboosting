@@ -16,7 +16,9 @@ def test_objective_regression(gamma):
     data = lgb.Dataset(X, y)
     data.anchor = a
     obj_approx = approx_fprime(f, lambda f_: len(y) * loss.score(f_, data)[1], 1e-6)
-    np.testing.assert_allclose(obj_approx, loss.objective(f, data)[0], rtol=1e-5)
+    np.testing.assert_allclose(
+        0.5 * obj_approx, loss.objective(f, data)[0], rtol=1e-5, atol=2e-6
+    )
 
 
 @pytest.mark.parametrize("gamma", [0, 0.1, 0.5, 1, 2, 10, 100, 1000])
@@ -29,7 +31,9 @@ def test_objective_classification(gamma):
     data = lgb.Dataset(X, y)
     data.anchor = a
     obj_approx = approx_fprime(f, lambda f_: len(y) * loss.score(f_, data)[1], 1e-6)
-    np.testing.assert_allclose(obj_approx, loss.objective(f, data)[0], rtol=1e-5)
+    np.testing.assert_allclose(
+        obj_approx, loss.objective(f, data)[0], rtol=1e-5, atol=1e-6
+    )
 
 
 @pytest.mark.parametrize("gamma", [0.1, 1, 2, 10, 100, 1000])

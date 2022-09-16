@@ -60,7 +60,7 @@ class AnchorMixin:
 
     def hess(self, f, y, anchor):
         """Trivial hessian for LGBM."""
-        return 2 * np.ones(f.size)
+        return np.ones(f.size)
 
 
 class AnchorRegressionLoss(AnchorMixin):
@@ -68,19 +68,23 @@ class AnchorRegressionLoss(AnchorMixin):
     name = "anchor_regression"
 
     def init_score(self, y):
-        return np.tile(np.mean(y), len(y))
+        return np.tile(0, len(y))
 
     def residuals(self, predictions, y):
         return y - predictions
 
     def grad(self, f, y, anchor):
         residuals = self.residuals(f, y)
-        return -2.0 * residuals + -2.0 * (self.gamma - 1) * self._proj(
-            anchor, residuals
-        )
+        # Replicate LGBM behaviour
+        # https://github.com/microsoft/LightGBM/blob/e9fbd19d7cbaeaea1ca54a091b160868fc\
+        # 5c79ec/src/objective/regression_objective.hpp#L130-L131
+        return -residuals - (self.gamma - 1) * self._proj(anchor, residuals)
 
     def hess(self, f, y, anchor):
-        return 2.0 * np.ones(len(y))
+        # Replicate LGBM behaviour
+        # https://github.com/microsoft/LightGBM/blob/e9fbd19d7cbaeaea1ca54a091b160868fc\
+        # 5c79ec/src/objective/regression_objective.hpp#L130-L131
+        return np.ones(len(y))
 
     def loss(self, f, y, anchor):
         residuals = self.residuals(f, y)
@@ -221,7 +225,7 @@ class AnchorClassificationLoss(AnchorMixin):
 
         f = f - np.max(f, axis=1)[:, np.newaxis]  # normalize f to avoid overflow
         predictions = np.exp(f)
-        predictions /= np.sum(predictions, axis=1, keepdims=True)
+        predictions /= np.sum(predictions, axis=1)[:, np.newaxis]  # , keepdims=True)
         return predictions
 
     def residuals(self, predictions, y):
