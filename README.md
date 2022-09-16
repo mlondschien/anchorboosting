@@ -31,11 +31,19 @@ $$
 $$
 
 ## Anchorized multiclass classification
-[1] suggests to add a regularization term based on an "anchor variable" to the linear least squares optimization problem to improve distributional robustness.
+[1] suggest adding a regularization term based on an "anchor variable" $A$ to the linear least squares optimization problem to improve distributional robustness.
 [2] describes how this idea could be applied to nonlinear regression and [3] presents an idea to generalize this to (two-class) classification.
+We combine these notions and generalize the residuals presented in [3] to multiclass classification.
 
 Say additional to features and outcomes we observe anchor values $a_i \in \mathbb{R}^q, i=1,\ldots K$.
 Write $A = (a_i)_{i=1}^n \in \mathbb{R}^{n \times q}$ and $\pi_A$ for the plinear rojection onto the column space of $A$.
+[1] show that
+
+$$
+b^\gamma = \underset{b}{\arg\min} \|(\mathrm{Id} - \pi_A)(Y - Xb)\|_2^2 + \gamma\|\pi_A(Y - Xb)\|_2^2
+$$
+
+minimizes the linear model's worst-case risk with respect to certain shift interventions as seen in the data.
 Motivated by [3], define residuals 
 $$r_{i, k} = \begin{cases}
 1 - p_{i, k} &  y_i = k \\
@@ -44,6 +52,11 @@ $$r_{i, k} = \begin{cases}
 such that for all $i$ we have $\sum_{i, j} r_{i, j} = 0$.
 
 For some tuning parameter $\gamma$, we add the additional regularization term $\gamma \| \pi_A r \|_2^2$ to our optimization problem.
+
+$$
+\hat f = \underset{f}{\arg \min} \ \ell(f, Y) + (\gamma - 1) \|\pi_A r\|_2^2
+$$
+
 This encourages uncorrelatedness between the residuals and the anchor and, hopefully, better domain generalization. To optimize this, we also calculate the gradient of the regularization term. First, note that
 
 $$
@@ -66,7 +79,7 @@ $$
 \frac{d^2}{d^2 f_{i, k}} p_{i, j} =
 \begin{cases}
 (1 - 2 p_{i, j}) p_{i, j} (1 - p_{i, j}) & j = k \\
-p_{i, j}^2 p_{i, k} & i \neq k3
+p_{i, j}^2 p_{i, k} & i \neq k
 \end{cases}
 $$
 
