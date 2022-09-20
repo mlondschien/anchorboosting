@@ -18,6 +18,7 @@ For $k = 1, \ldots, K$ and $i=1, \ldots, n$ the estimated probability of observa
 $$\ell\left((f_{i, k})_{i=1, \ldots, n}^{k=1, \ldots, K}, (y_i)_{i=1}^n\right) = \sum_{i=1}^n \left(f_{i, y} - \log\left(\sum_{j=1}^K \exp(f_{i,j})\right)\right).$$
 
 The gradient of the log-likelihood is
+
 $$
 \frac{d}{df_{i, k}} \ell(f, y) = \begin{cases}
 1 - p_{i, k} &  y_i = k \\
@@ -44,8 +45,11 @@ b^\gamma = \underset{b}{\arg\min} \|(\mathrm{Id} - \pi_A)(Y - Xb)\|_2^2 + \gamma
 $$
 
 minimizes the linear model's worst-case risk with respect to certain shift interventions as seen in the data.
+
 Motivated by [3], define residuals 
-$$r_{i, k} = \begin{cases}
+$$r_{i, k} =
+\frac{d}{df_{i, k}} \ell(f, y) =
+ \begin{cases}
 1 - p_{i, k} &  y_i = k \\
 - p_{i, k} &  y_i \neq k
 \end{cases}$$
@@ -70,15 +74,17 @@ $$
 \begin{cases}
 p_{i, j} - p_{i, j}p_{i, k} & j = k \\
 - p_{i, j} p_{i, k} & j \neq k
-\end{cases}
+\end{cases}.
 $$
 
-Then, 
-$$\frac{d}{d f_{i, k}} \| \pi_A r\|_2^2 = 2 \pi_A r \cdot \left(\begin{cases}
+Then,
+
+$$
+\frac{d}{d f_{i, k}} \| \pi_A r\|_2^2 = 2 \pi_A r \cdot \left(\begin{cases}
 p_{i, j} - p_{i, j}p_{i, k} & j = k \\
 - p_{i, j} p_{i, k} & j \neq k
-\end{cases}\right)_{i=1, \ldots, n}^{j,k=1, \ldots K}
-= (\pi_A r)_{i, k} \ p_{i, k} - \sum_{l=1}^K (\pi_A r)_{i, l} \ p_{i, l}
+\end{cases}\right)_{i=1, \ldots, n}^{j=1, \ldots K}
+= (\pi_A r)_{i, k} \ p_{i, k} - \sum_{l=1}^K (\pi_A r)_{i, l} \ p_{i, l}.
 $$
 <!-- and
 
