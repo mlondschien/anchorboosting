@@ -5,7 +5,7 @@ from sklearn.linear_model import LinearRegression
 
 from anchorboost.anchor_loss import AnchorRegressionLoss
 
-rng = np.random.default_rng(1)
+rng = np.random.default_rng(0)
 n = 200
 shift = 1.8
 
