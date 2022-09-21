@@ -110,7 +110,7 @@ class AnchorClassificationLoss(AnchorMixin):
 
     name = "anchor_classification"
 
-    def __init__(self, gamma, n_classes):
+    def __init__(self, gamma, n_classes, center_residuals=False):
         super().__init__(gamma)
         self.n_classes = n_classes
 
@@ -121,6 +121,8 @@ class AnchorClassificationLoss(AnchorMixin):
         # redundant class, whose output is set to 0 (like the class 0 in binary
         # classification). This is from the Friedman GBDT paper.
         self.factor = n_classes / (n_classes - 1)
+
+        self.center_residuals = center_residuals
 
     def init_score(self, y):
         """Initial score for LGBM.
@@ -257,6 +259,10 @@ class AnchorClassificationLoss(AnchorMixin):
         assert predictions.shape == (len(y), self.n_classes)
         residuals = predictions.copy()
         residuals[self._indices(y)] -= 1
+
+        if self.center_residuals:
+            residuals -= residuals.mean(axis=0)
+
         return residuals
 
     def grad(self, f, y, anchor):
@@ -264,8 +270,13 @@ class AnchorClassificationLoss(AnchorMixin):
 
         f = f - np.max(f, axis=1)[:, np.newaxis]  # normalize f to avoid overflow
         predictions = self.predictions(f)
+
         residuals = self.residuals(predictions, y)
         proj_residuals = self._proj(anchor, residuals)
+
+        if self.center_residuals:
+            proj_residuals -= proj_residuals.mean(axis=0)
+
         anchor_gradient = (
             2
             * predictions
