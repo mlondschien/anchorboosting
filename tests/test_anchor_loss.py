@@ -41,8 +41,11 @@ def test_objective_classification(gamma, center_residuals):
     grad_approx = approx_fprime(f, lambda f_: len(y) * loss.score(f_, data)[1], 1e-6)
     np.testing.assert_allclose(grad_approx, gradient, rtol=1e-5, atol=1e-6)
 
-    # hess_approx = approx_fprime(f, lambda f_: loss.objective(f_, data)[0], 1e-5)
-    # np.testing.assert_allclose(hessian, np.diag(hess_approx), rtol=5e-4, atol=5e-4)
+    if gamma == 1:
+        hess_approx = approx_fprime(f, lambda f_: loss.objective(f_, data)[0], 1e-5)
+        np.testing.assert_allclose(
+            hessian / loss.factor, np.diag(hess_approx), rtol=5e-4, atol=5e-4
+        )
 
 
 @pytest.mark.parametrize("gamma", [0.1, 1, 2, 10, 100, 1000])
