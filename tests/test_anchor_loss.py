@@ -7,7 +7,7 @@ from anchorboost.anchor_loss import AnchorClassificationLoss, AnchorRegressionLo
 from anchorboost.simulate import f2, simulate
 
 
-@pytest.mark.parametrize("gamma", [0, 0.1, 0.5, 1, 2, 10, 100, 1000])
+@pytest.mark.parametrize("gamma", [0, 0.1, 0.5, 1, 2, 10, 100])
 def test_objective_regression(gamma):
     loss = AnchorRegressionLoss(gamma)
     X, y, a = simulate(f2, n=100)
@@ -15,25 +15,37 @@ def test_objective_regression(gamma):
     f = rng.normal(size=len(y))
     data = lgb.Dataset(X, y)
     data.anchor = a
-    obj_approx = approx_fprime(f, lambda f_: len(y) * loss.score(f_, data)[1], 1e-6)
-    np.testing.assert_allclose(
-        0.5 * obj_approx, loss.objective(f, data)[0], rtol=1e-5, atol=2e-6
-    )
+
+    gradient, hessian = loss.objective(f, data)
+
+    grad_approx = approx_fprime(f, lambda f_: len(y) * loss.score(f_, data)[1], 1e-5)
+    np.testing.assert_allclose(grad_approx, gradient, rtol=1e-5, atol=1e-5)
+
+    hess_approx = approx_fprime(f, lambda f_: loss.objective(f_, data)[0].sum(), 1e-5)
+    np.testing.assert_allclose(hessian, hess_approx, rtol=5e-4, atol=5e-4)
 
 
+@pytest.mark.parametrize("center_residuals", [True, False])
 @pytest.mark.parametrize("gamma", [0, 0.1, 0.5, 1, 2, 10, 100, 1000])
-def test_objective_classification(gamma):
-    loss = AnchorClassificationLoss(gamma, n_classes=3)
+def test_objective_classification(gamma, center_residuals):
+    loss = AnchorClassificationLoss(gamma, 3, center_residuals)
     X, y, a = simulate(f2, n=10)
     y = (y > 0).astype(int) + (y > 1).astype(int)
     rng = np.random.RandomState(0)
     f = rng.normal(size=3 * len(y))
     data = lgb.Dataset(X, y)
     data.anchor = a
-    obj_approx = approx_fprime(f, lambda f_: len(y) * loss.score(f_, data)[1], 1e-6)
-    np.testing.assert_allclose(
-        obj_approx, loss.objective(f, data)[0], rtol=1e-5, atol=1e-6
-    )
+
+    gradient, hessian = loss.objective(f, data)
+
+    grad_approx = approx_fprime(f, lambda f_: len(y) * loss.score(f_, data)[1], 1e-6)
+    np.testing.assert_allclose(grad_approx, gradient, rtol=1e-5, atol=1e-6)
+
+    if gamma == 1:
+        hess_approx = approx_fprime(f, lambda f_: loss.objective(f_, data)[0], 1e-5)
+        np.testing.assert_allclose(
+            hessian / loss.factor, np.diag(hess_approx), rtol=5e-4, atol=5e-4
+        )
 
 
 @pytest.mark.parametrize("gamma", [0.1, 1, 2, 10, 100, 1000])
