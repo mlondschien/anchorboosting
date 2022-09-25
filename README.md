@@ -11,7 +11,19 @@ Lastly, [3] give ideas to generalize anchor regression to classification.
 
 This repository combines these approaches and implements non-linear anchor (multiclass-) classification using LGBM.
 
-## Simple two-class classification
+## Classification via boosting
+
+We first describe how to explicitly solve a classification problem with boosting.
+This includes calculating the gradient and the diagonal of the hessian of the loss with respect to model parameters.
+In each boosting step, the gradient is fit with a weak learner (CART tree).
+The diagonal of the hessian is used as a stopping criterium only (`min_hessian_in_leaf`).
+
+We separately describe two-class and multi-class classification, even though the former is a special case of the latter.
+$K$-class classification involves learning $K$ scores (parameters), each fitted with a single weak learner.
+I.e., the boosting algorithm will train $K$ trees in each set.
+
+### Two-class classification
+
 Consider a setup with observations $x_i \in \mathbb{R}^p$ with outcomes $y_i \in \{-1, 1\}$ for $i=1, \ldots, n$. 
 We assign raw scores $f_i \in \mathbb{R}$ to each observation and use the expit to obtain probability predictions.
 The estimated probability of observation $x_i$ with raw score $f_i$ to belong to class 1 is $p_i = \frac{e^f}{1 + e^f} = (1 + e^{-f})^{-1}$.
@@ -32,10 +44,10 @@ $$
 The (diagonal of the) Hessian of the log-likelihood is
 
 $$
-\frac{d^2}{d^2f_i} \ell(f, y) = (1 - p) p.
+\frac{d^2}{d^2f_i} \ell(f, y) = (1 - p_i) p_i.
 $$
 
-## Simple multiclass classification
+### Multiclass classification
 Consider a setup with observations $x_i \in \mathbb{R}^p$ with outcomes $y_i \in \{1, \ldots, K\}$ for $i=1, \ldots, n$.
 We assign raw scores $f_i = (f_{i, 1}, \ldots, f_{i, K}) \in \mathbb{R}^K$ to each observation and use cross-entropy to obtain probability predictions.
 For $k = 1, \ldots, K$ and $i=1, \ldots, n$ the estimated probability of observation $x_i$ with raw score $f_i$ to belong to class $k$ is $p_{i, k} := \exp(f_{i, k}) / \sum_{j=1}^K \exp(f_{i, j})$. The log-likelihood of raw scores $(f_i)_{i=1}^n$ is then 
@@ -55,13 +67,12 @@ $$
 \frac{d^2}{d^2f_{i, k}} \ell(f, y) = (1 - p_{i, k}) p_{i, k}
 $$
 
-## Anchorized multiclass classification according to [3]
+## Anchorized classification
+
 [1] suggest adding a regularization term based on an "anchor variable" $A$ to the linear least squares optimization problem to improve distributional robustness.
-[2] describes how this idea could be applied to nonlinear regression and [3] presents an idea to generalize this to (two-class) classification.
-We combine these notions and generalize the residuals presented in [3] to multiclass classification.
 
 Say additional to features and outcomes we observe anchor values $a_i \in \mathbb{R}^q, i=1,\ldots K$.
-Write $A = (a_i)_{i=1}^n \in \mathbb{R}^{n \times q}$ and $\pi_A$ for the plinear rojection onto the column space of $A$.
+Write $A = (a_i)_{i=1}^n \in \mathbb{R}^{n \times q}$ and $\pi_A$ for the linear projection onto the column space of $A$.
 [1] show that
 
 $$
@@ -70,6 +81,47 @@ $$
 
 minimizes the linear model's worst-case risk with respect to certain shift interventions as seen in the data.
 
+[2] suggests applying anchor regression to nonlinear regression by boosting the above anchor loss with a flexible (nonlinear) learner.
+[3] presents an idea to generalize anchor regression to different distributions than the Gaussian distribution, i.e., using different losses than the squared error.
+One interesting case is the logistic loss for (two-class) classification.
+This is mostly based on intelligently defining residuals to be used in the equivalent classification anchor loss.
+
+[4] proposes the usage of a different type of residuals for classification outside of the use with anchor regression.
+We apply their residuals in the context of anchor classification.
+
+### Anchorized two-class classification according to [3]
+
+Note that again $y \in \{-1, 1\}$. 
+[3] suggest defining residuals as
+
+$$r_i = \frac{d}{d f}(\ell(f, y)) = y \frac{e^{-yf}}{1 + e^{-yf}} =
+\begin{cases}
+1 - p & y = 1 \\
+- p & y = 0
+\end{cases}
+$$
+
+For some tuning parameter $\gamma$, we add the regularization term $(\gamma - 1) \| \pi_A r \|_2^2$ to our optimization problem.
+
+$$
+\hat f = \underset{f}{\arg \min} \ \ell(f, Y) + (\gamma - 1) \|\pi_A r\|_2^2
+$$
+
+This encourages uncorrelatedness between the residuals and the anchor and, hopefully, better domain generalization. To optimize this, we also calculate the gradient of the regularization term. First, note that
+
+$$
+\frac{d}{d f_i} p_i = p_i (1 - p_i)
+$$
+
+such that
+
+$$
+\frac{d}{d f_i} \| \pi_A r \|_2^2 = 2 \pi_A r \cdot p (1 - p)
+$$
+
+### Anchorized multiclass classification according to [3]
+
+We combine the notions of [1, 2, 3].
 Motivated by [3], define residuals 
 $$r_{i, k} =
 \frac{d}{df_{i, k}} \ell(f, y) =
