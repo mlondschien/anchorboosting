@@ -2,6 +2,7 @@ from .anchor_mixins import AnchorMixin
 from .anchor_objectives import (
     AnchorKookClassificationObjective,
     AnchorKookMultiClassificationObjective,
+    AnchorLiuClassificationObjective,
     AnchorRegressionObjective,
 )
 from .classification_mixins import ClassificationMixin, MultiClassificationMixin
@@ -17,6 +18,7 @@ __all__ = [
     "AnchorKookMultiClassificationObjective",
     "AnchorClassificationLoss",
     "AnchorRegressionLoss",
+    "AnchorLiuClassificationObjective",
     "AnchorMixin",
     "AnchorRegressionObjective",
     "ClassificationMixin",

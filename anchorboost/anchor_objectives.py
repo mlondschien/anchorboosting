@@ -80,6 +80,30 @@ class AnchorKookMultiClassificationObjective(
         return super().grad(f, data) + anchor_grad.flatten("F")
 
 
+class AnchorLiuClassificationObjective(AnchorMixin, ClassificationMixin, LGBMMixin):
+    def __init__(self, gamma):
+        self.gamma = gamma
+        self.name = "liu anchor classification"
+
+    def residuals(self, f, data):
+        y = 2 * data.get_label() - 1
+        return -f + y * (1 + np.exp(-y * f)) * np.log1p(np.exp(y * f))
+
+    def loss(self, f, data):
+        return (
+            super().loss(f, data)
+            + (self.gamma - 1) * self._proj(data.anchor, self.residuals(f, data)) ** 2
+        )
+
+    def grad(self, f, data):
+        y = 2 * data.get_label() - 1
+        proj_residuals = self._proj(data.anchor, self.residuals(f, data))
+
+        return super().grad(f, data) - 2 * (self.gamma - 1) * proj_residuals * np.exp(
+            -y * f
+        ) * np.log1p(np.exp(y * f))
+
+
 class AnchorRegressionObjective(AnchorMixin, RegressionMixin, LGBMMixin):
     def __init__(self, gamma):
         self.gamma = gamma
@@ -95,6 +119,5 @@ class AnchorRegressionObjective(AnchorMixin, RegressionMixin, LGBMMixin):
         )
 
     def grad(self, f, data):
-        return super().grad(f, data) + 2 * (self.gamma - 1) * self._proj(
-            data.anchor, self.residuals(f, data)
-        ) * (-1)
+        proj_residuals = self._proj(data.anchor, self.residuals(f, data))
+        return super().grad(f, data) - 2 * (self.gamma - 1) * proj_residuals
