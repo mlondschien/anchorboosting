@@ -11,10 +11,34 @@ Lastly, [3] give ideas to generalize anchor regression to classification.
 
 This repository combines these approaches and implements non-linear anchor (multiclass-) classification using LGBM.
 
+## Simple two-class classification
+Consider a setup with observations $x_i \in \mathbb{R}^p$ with outcomes $y_i \in \{-1, 1\}$ for $i=1, \ldots, n$. 
+We assign raw scores $f_i \in \mathbb{R}$ to each observation and use the expit to obtain probability predictions.
+The estimated probability of observation $x_i$ with raw score $f_i$ to belong to class 1 is $p_i = \frac{e^f}{1 + e^f} = (1 + e^{-f})^{-1}$.
+The log-likelihood of raw scores $f=(f_i)_{i=1}^n$ is
+
+$$\ell(f, y) = -\sum_{i=1}^n \log(1 + e^{-yf}).$$
+
+The gradient of the log-likelihood is
+
+$$
+\frac{d}{d f_i} \ell(f, y) = y \frac{e^{-yf}}{1 + e^{-yf}} =
+\begin{cases}
+1 - p & y = 1 \\
+- p & y = 0
+\end{cases}
+$$
+
+The (diagonal of the) Hessian of the log-likelihood is
+
+$$
+\frac{d^2}{d^2f_i} \ell(f, y) = (1 - p) p.
+$$
+
 ## Simple multiclass classification
 Consider a setup with observations $x_i \in \mathbb{R}^p$ with outcomes $y_i \in \{1, \ldots, K\}$ for $i=1, \ldots, n$.
 We assign raw scores $f_i = (f_{i, 1}, \ldots, f_{i, K}) \in \mathbb{R}^K$ to each observation and use cross-entropy to obtain probability predictions.
-For $k = 1, \ldots, K$ and $i=1, \ldots, n$ the estimated probability of observation $i$ with raw score $f_i$ to belong to class $k$ is $p_{i, k} := \exp(f_{i, k}) / \sum_{j=1}^K \exp(f_{i, j})$. The log-likelihood of raw scores $(f_i)_{i=1}^n$ is then 
+For $k = 1, \ldots, K$ and $i=1, \ldots, n$ the estimated probability of observation $x_i$ with raw score $f_i$ to belong to class $k$ is $p_{i, k} := \exp(f_{i, k}) / \sum_{j=1}^K \exp(f_{i, j})$. The log-likelihood of raw scores $(f_i)_{i=1}^n$ is then 
 $$\ell\left((f_{i, k})_{i=1, \ldots, n}^{k=1, \ldots, K}, (y_i)_{i=1}^n\right) = \sum_{i=1}^n \left(f_{i, y} - \log\left(\sum_{j=1}^K \exp(f_{i,j})\right)\right).$$
 
 The gradient of the log-likelihood is
@@ -31,7 +55,7 @@ $$
 \frac{d^2}{d^2f_{i, k}} \ell(f, y) = (1 - p_{i, k}) p_{i, k}
 $$
 
-## Anchorized multiclass classification
+## Anchorized multiclass classification according to [3]
 [1] suggest adding a regularization term based on an "anchor variable" $A$ to the linear least squares optimization problem to improve distributional robustness.
 [2] describes how this idea could be applied to nonlinear regression and [3] presents an idea to generalize this to (two-class) classification.
 We combine these notions and generalize the residuals presented in [3] to multiclass classification.
@@ -81,12 +105,33 @@ Then,
 
 $$
 \frac{d}{d f_{i, k}} \| \pi_A r\|_2^2 = 2 \pi_A r \cdot \left(\begin{cases}
-p_{i, j} - p_{i, j}p_{i, k} & j = k \\
-- p_{i, j} p_{i, k} & j \neq k
-\end{cases}\right)_{i=1, \ldots, n}^{j=1, \ldots K}
+p_{i, j} - p_{i, j}p_{i, k} & l=i, j = k \\
+- p_{i, j} p_{i, k} & l=i, j \neq k \\
+0 & l \neq i
+\end{cases}\right)_{l=1, \ldots, n}^{j=1, \ldots K}
 = (\pi_A r)_{i, k} \ p_{i, k} - \sum_{l=1}^K (\pi_A r)_{i, l} \ p_{i, l}.
 $$
-<!-- and
+
+<!---
+The diagonal of the hessian is equal to 
+
+$$
+\frac{d^2}{d f_{i, k}^2} \| \pi_A r\|^2 = 2 \pi_A r \cdot
+\left(\begin{cases}
+p_{i, j} - 3 p_{i, j}^2 + 2 p_{i, j}^3 & l=i, j = k \\
+2 p_{i, j} p_{i, k}^2 - p_{i, j} p{i, k} & l=i, j \neq k \\
+0 & l \neq i
+\end{cases}\right)_{l=1, \ldots, n}^{j=1, \ldots K} +
+2 \pi_A \left(\begin{cases}
+p_{i, j} - p_{i, j}p_{i, k} & l=i, j = k \\
+- p_{i, j} p_{i, k} & l=i, j \neq k \\
+0 & l \neq i
+\end{cases}\right)_{l=1, \ldots, n}^{j=1, \ldots K} \cdot \left(\begin{cases}
+p_{i, j} - p_{i, j}p_{i, k} & l=i, j = k \\
+- p_{i, j} p_{i, k} & l=i, j \neq k \\
+0 & l \neq i
+\end{cases}\right)_{l=1, \ldots, n}^{j=1, \ldots K}
+$$
 
 $$
 \frac{d^2}{d f_{i, k} d f_{i, l}} p_{i, j} =
@@ -94,18 +139,10 @@ $$
 (1 - 2 p_{i, j}) p_{i, j} (1 - p_{i, j}) & j = k \\
 p_{i, j}^2 p_{i, k} & j \neq k
 \end{cases}
-$$
-
- such that
-
-$$
-\frac{d}{d f_{i, k}} \|\pi_A r\|_2^2 = 2 \pi_A r \cdot \pi_A \frac{d}{d f_{i, k}}(p_{i, j})_{i, j}
-$$
-
-Furthermore, the (diagonal of the) Hessian is ??? 
-$$
-\frac{d^2}{d^2 f_{i, k}} \|\pi_A r\|_2^2 = 2 \pi_A
 $$ -->
+
+## Anchorized two-class classification with residuals motivated by [4]
+
 
 
 ## References
