@@ -11,9 +11,12 @@ from anchorboost import (
 from anchorboost.simulate import f2, simulate
 
 
+@pytest.mark.parametrize("center_residuals", [True, False])
 @pytest.mark.parametrize("gamma", [0, 0.5, 1, 5, 100])
-def test_anchor_kook_classification_objective(gamma):
-    loss = AnchorKookClassificationObjective(gamma=gamma)
+def test_anchor_kook_classification_objective(gamma, center_residuals):
+    loss = AnchorKookClassificationObjective(
+        gamma=gamma, center_residuals=center_residuals
+    )
     X, y, a = simulate(f2, n=10)
     y = (y > 0).astype(int)
     rng = np.random.RandomState(0)
@@ -29,9 +32,12 @@ def test_anchor_kook_classification_objective(gamma):
     np.testing.assert_allclose(grad_approx, grad, rtol=1e-5, atol=1e-6)
 
 
+@pytest.mark.parametrize("center_residuals", [True, False])
 @pytest.mark.parametrize("gamma", [0, 0.5, 1, 5, 100])
-def test_anchor_kook_multi_classification_objective(gamma):
-    loss = AnchorKookMultiClassificationObjective(n_classes=3, gamma=gamma)
+def test_anchor_kook_multi_classification_objective(gamma, center_residuals):
+    loss = AnchorKookMultiClassificationObjective(
+        n_classes=3, gamma=gamma, center_residuals=center_residuals
+    )
     X, y, a = simulate(f2, n=10)
     y = (y > 0).astype(int) + (y > 1).astype(int)
     rng = np.random.RandomState(0)
