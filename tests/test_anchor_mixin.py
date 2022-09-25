@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from scipy.linalg import norm
 
-from anchorboost.anchor_losses import AnchorMixin
+from anchorboost import AnchorMixin
 
 cases = [
     (

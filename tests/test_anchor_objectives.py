@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 from scipy.optimize import approx_fprime
 
-from anchorboost.anchor_losses import (
+from anchorboost import (
     AnchorKookClassificationObjective,
     AnchorKookMultiClassificationObjective,
     AnchorRegressionObjective,

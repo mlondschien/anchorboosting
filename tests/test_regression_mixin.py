@@ -2,7 +2,7 @@ import lightgbm as lgb
 import numpy as np
 from scipy.optimize import approx_fprime
 
-from anchorboost.anchor_losses import RegressionMixin
+from anchorboost import RegressionMixin
 from anchorboost.simulate import f2, simulate
 
 

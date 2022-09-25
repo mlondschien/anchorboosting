@@ -1,7 +1,7 @@
 import lightgbm as lgb
 import numpy as np
 
-from anchorboost.anchor_losses import (
+from anchorboost import (
     ClassificationMixin,
     LGBMMixin,
     MultiClassificationMixin,

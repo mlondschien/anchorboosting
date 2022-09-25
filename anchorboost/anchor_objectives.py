@@ -1,12 +1,12 @@
 import numpy as np
 
-from anchorboost.anchor_losses.anchor_mixins import AnchorMixin
-from anchorboost.anchor_losses.classification_mixins import (
+from anchorboost.anchor_mixins import AnchorMixin
+from anchorboost.classification_mixins import (
     ClassificationMixin,
     MultiClassificationMixin,
 )
-from anchorboost.anchor_losses.lgbm_mixins import LGBMMixin
-from anchorboost.anchor_losses.regression_mixins import RegressionMixin
+from anchorboost.lgbm_mixins import LGBMMixin
+from anchorboost.regression_mixins import RegressionMixin
 
 
 class AnchorKookClassificationObjective(AnchorMixin, ClassificationMixin, LGBMMixin):
