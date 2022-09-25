@@ -13,6 +13,7 @@ class AnchorKookClassificationObjective(AnchorMixin, ClassificationMixin, LGBMMi
     def __init__(self, gamma, center_residuals=False):
         self.gamma = gamma
         self.center_residuals = center_residuals
+        self.name = "kook anchor classification"
 
     def residuals(self, f, data):
         residuals = self.predictions(f) - data.get_label()
@@ -45,6 +46,7 @@ class AnchorKookMultiClassificationObjective(
         self.gamma = gamma
         self.center_residuals = center_residuals
         super().__init__(n_classes)
+        self.name = "kook anchor multi-classification"
 
     def residuals(self, f, data):
         predictions = self.predictions(f)
@@ -77,6 +79,7 @@ class AnchorKookMultiClassificationObjective(
 class AnchorRegressionObjective(AnchorMixin, RegressionMixin, LGBMMixin):
     def __init__(self, gamma):
         self.gamma = gamma
+        self.name = "anchor regression"
 
     def residuals(self, f, data):
         return data.get_label() - f
