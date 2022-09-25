@@ -97,7 +97,8 @@ class AnchorLiuClassificationObjective(AnchorMixin, ClassificationMixin, LGBMMix
 
     def grad(self, f, data):
         y = 2 * data.get_label() - 1
-        proj_residuals = self._proj(data.anchor, self.residuals(f, data))
+        residuals = self.residuals(f, data)
+        proj_residuals = self._proj(data.anchor, residuals)
 
         return super().grad(f, data) - 2 * (self.gamma - 1) * proj_residuals * np.exp(
             -y * f
