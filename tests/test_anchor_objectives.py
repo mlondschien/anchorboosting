@@ -53,6 +53,47 @@ def test_anchor_kook_multi_classification_objective(gamma, center_residuals):
     np.testing.assert_allclose(grad_approx, grad, rtol=1e-5, atol=1e-6)
 
 
+@pytest.mark.parametrize("center_residuals", [True, False])
+@pytest.mark.parametrize("gamma", [0, 0.5, 1, 5, 100])
+def test_compare_kook_anchor_classifications(gamma, center_residuals):
+    single_loss = AnchorKookClassificationObjective(
+        gamma=gamma, center_residuals=center_residuals
+    )
+    multi_loss = AnchorKookMultiClassificationObjective(
+        n_classes=2, gamma=gamma, center_residuals=center_residuals
+    )
+
+    X, y, a = simulate(f2, n=100)
+    y = (y > 0).astype(int)
+
+    single_data = lgb.Dataset(X, y, init_score=single_loss.init_score(y))
+    single_data.anchor = a
+
+    multi_data = lgb.Dataset(X, y, init_score=multi_loss.init_score(y))
+    multi_data.anchor = a
+
+    single_model = lgb.train(
+        params={"learning_rate": 0.1, "objective": "binary"},
+        train_set=single_data,
+        num_boost_round=10,
+        fobj=single_loss.objective,
+    )
+
+    multi_model = lgb.train(
+        params={"learning_rate": 0.1, "num_class": 2},
+        train_set=multi_data,
+        num_boost_round=10,
+        fobj=multi_loss.objective,
+    )
+
+    single_pred = single_model.predict(X)
+    multi_pred = multi_model.predict(X)
+
+    np.testing.assert_allclose(
+        single_pred, multi_pred[:, 1] - multi_pred[:, 0], rtol=1e-5, atol=1e-6
+    )
+
+
 @pytest.mark.parametrize("gamma", [0, 0.5, 1, 5, 100])
 def test_anchor_regression_objective(gamma):
     loss = AnchorRegressionObjective(gamma=gamma)
