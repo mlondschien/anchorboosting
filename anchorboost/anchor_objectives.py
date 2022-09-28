@@ -10,8 +10,9 @@ from anchorboost.regression_mixins import RegressionMixin
 
 
 class AnchorKookClassificationObjective(AnchorMixin, ClassificationMixin, LGBMMixin):
-    def __init__(self, gamma, center_residuals=False):
+    def __init__(self, gamma, gamma_2=1, center_residuals=False):
         self.gamma = gamma
+        self.gamma_2 = gamma_2
         self.center_residuals = center_residuals
         self.name = "kook anchor classification"
 
@@ -22,21 +23,32 @@ class AnchorKookClassificationObjective(AnchorMixin, ClassificationMixin, LGBMMi
         return residuals
 
     def loss(self, f, data):
+        residuals = self.residuals(f, data)
         return (
             super().loss(f, data)
-            + (self.gamma - 1) * self._proj(data.anchor, self.residuals(f, data)) ** 2
+            + (self.gamma - 1) * self._proj(data.anchor, residuals) ** 2
+            + (self.gamma_2 - 1) * self._proj(data.anchor, residuals**2) ** 2
         )
 
     def grad(self, f, data):
         predictions = self.predictions(f)
-        proj_residuals = self._proj(data.anchor, self.residuals(f, data))
+        residuals = self.residuals(f, data)
+        proj_residuals = self._proj(data.anchor, residuals)
+        proj_squared_residuals = self._proj(data.anchor, residuals**2)
 
         if self.center_residuals:
             proj_residuals -= proj_residuals.mean()
 
-        return super().grad(f, data) + 2 * (
-            self.gamma - 1
-        ) * proj_residuals * predictions * (1 - predictions)
+        return (
+            super().grad(f, data)
+            + 2 * (self.gamma - 1) * proj_residuals * predictions * (1 - predictions)
+            + 4
+            * (self.gamma_2 - 1)
+            * proj_squared_residuals
+            * residuals
+            * predictions
+            * (1 - predictions)
+        )
 
 
 class AnchorKookMultiClassificationObjective(

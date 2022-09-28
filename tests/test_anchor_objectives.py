@@ -12,11 +12,19 @@ from anchorboost import (
 from anchorboost.simulate import f2, simulate
 
 
-@pytest.mark.parametrize("center_residuals", [True, False])
+@pytest.mark.parametrize(
+    "center_residuals, gamma_2",
+    [
+        (True, 1),
+        (False, 1),
+        (False, 0.1),
+        (False, 5),
+    ],
+)
 @pytest.mark.parametrize("gamma", [0, 0.5, 1, 5, 100])
-def test_anchor_kook_classification_objective(gamma, center_residuals):
+def test_anchor_kook_classification_objective(gamma, gamma_2, center_residuals):
     loss = AnchorKookClassificationObjective(
-        gamma=gamma, center_residuals=center_residuals
+        gamma=gamma, center_residuals=center_residuals, gamma_2=gamma_2
     )
     X, y, a = simulate(f2, n=10)
     y = (y > 0).astype(int)

@@ -133,7 +133,7 @@ class ClassificationMixin:
         np.ndarray of dimension (n,)
             Loss.
         """
-        return np.log(1 + np.exp((-2 * data.get_label() + 1) * f))
+        return np.log1p(np.exp((-2 * data.get_label() + 1) * f))
 
     def predictions(self, f):
         """Compute probability predictions from scores via softmax.
