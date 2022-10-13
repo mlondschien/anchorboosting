@@ -1,5 +1,6 @@
 import lightgbm as lgb
 import numpy as np
+import pytest
 
 from anchorboost import (
     ClassificationMixin,
@@ -18,7 +19,19 @@ class MultiClassificationObjective(LGBMMixin, MultiClassificationMixin):
     pass
 
 
-def test_classification_to_lgbm():
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        # {"colsample_bytree": 0.6},
+        {"max_depth": -1},
+        {"num_leaves": 63},
+        {"min_split_gain": 0.002},
+        {"reg_lambda": 2},
+        {"subsample_freq": 0},
+        {"subsample": 0.2},
+    ],
+)
+def test_classification_to_lgbm(parameters):
 
     X, y, a = simulate(f1, shift=0, seed=0)
     y = (y > 0).astype(int)
@@ -29,20 +42,20 @@ def test_classification_to_lgbm():
     multi_data = lgb.Dataset(X, y, init_score=multi_loss.init_score(y))
 
     lgb_model = lgb.train(
-        params={"learning_rate": 0.1, "objective": "binary"},
+        params={"learning_rate": 0.1, "objective": "binary", **parameters},
         train_set=data,
         num_boost_round=10,
     )
 
     my_model = lgb.train(
-        params={"learning_rate": 0.1},
+        params={"learning_rate": 0.1, **parameters},
         train_set=data,
         num_boost_round=10,
         fobj=loss.objective,
     )
 
     my_multi_model = lgb.train(
-        params={"learning_rate": 0.1, "num_class": 2},
+        params={"learning_rate": 0.1, "num_class": 2, **parameters},
         train_set=multi_data,
         num_boost_round=10,
         fobj=multi_loss.objective,
