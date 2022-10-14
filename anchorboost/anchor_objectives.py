@@ -59,9 +59,9 @@ class AnchorKookMultiClassificationObjective(
     def loss(self, f, data):
         residuals = self.residuals(f, data).reshape((-1, self.n_classes), order="F")
         proj_residuals = self._proj(data.anchor, residuals)
-        # Multiply with factor**2 to align two-class classification with
+        # Multiply with factor to align two-class classification with
         # AnchorKookClassificationObjective
-        return super().loss(f, data) + self.factor**2 * (self.gamma - 1) * np.sum(
+        return super().loss(f, data) + self.factor * (self.gamma - 1) * np.sum(
             proj_residuals**2, axis=1
         )
 
@@ -74,11 +74,9 @@ class AnchorKookMultiClassificationObjective(
 
         predictions = self.predictions(f)
         proj_residuals -= np.sum(proj_residuals * predictions, axis=1, keepdims=True)
-        # Multiply with factor**2 to align two-class classification with
+        # Multiply with factor to align two-class classification with
         # AnchorKookClassificationObjective
-        anchor_grad = (
-            2 * self.factor**2 * (self.gamma - 1) * predictions * proj_residuals
-        )
+        anchor_grad = 2 * self.factor * (self.gamma - 1) * predictions * proj_residuals
         return super().grad(f, data) + anchor_grad.flatten("F")
 
 

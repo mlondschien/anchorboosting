@@ -75,13 +75,13 @@ def test_classification_to_lgbm(parameters):
     lgb_pred = lgb_model.predict(X)
     my_pred = loss.predictions(my_model.predict(X))
     my_multi_pred = multi_loss.predictions(my_multi_model.predict(X))[:, 1]
-    lgb_multi_model = lgb_multi_model.predict(X)[:, 1]
+    lgb_multi_pred = lgb_multi_model.predict(X)[:, 1]
 
     np.testing.assert_allclose(lgb_pred, my_pred, rtol=1e-5)
-    np.testing.assert_allclose(lgb_pred, my_multi_pred, rtol=1e-5)
+    np.testing.assert_allclose(my_multi_pred, lgb_multi_pred, rtol=1e-5)
 
     if "reg_lambda" not in parameters:
-        np.testing.assert_allclose(lgb_pred, lgb_multi_model, rtol=1e-5)
+        np.testing.assert_allclose(lgb_pred, lgb_multi_pred, rtol=1e-5)
 
 
 def test_multi_classification_to_lgbm():

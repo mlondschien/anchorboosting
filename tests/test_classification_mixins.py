@@ -73,7 +73,7 @@ def test_negative_log_likelihood_classification(y, f):
     data = lgb.Dataset(np.ones(len(y)), y)
     np.testing.assert_almost_equal(
         -loss.loss(f, data),
-        loss.factor * np.log(loss.predictions(f)[loss._indices(y)]),
+        np.log(loss.predictions(f)[loss._indices(y)]),
     )
 
 

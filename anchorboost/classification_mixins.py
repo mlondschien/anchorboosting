@@ -45,7 +45,7 @@ class MultiClassificationMixin:
         f = f.reshape((-1, self.n_classes), order="F")  # (n, n_classes)
         f = f - np.max(f, axis=1)[:, np.newaxis]  # normalize f to avoid overflow
         log_divisor = np.log(np.sum(np.exp(f), axis=1))
-        return self.factor * (-f[self._indices(y)] + log_divisor)
+        return -f[self._indices(y)] + log_divisor
 
     def _indices(self, y):
         return (np.arange(len(y)), y.astype(int))
@@ -84,7 +84,7 @@ class MultiClassificationMixin:
         predictions = self.predictions(f)
         predictions[self._indices(y)] -= 1
 
-        return self.factor * predictions.flatten("F")
+        return predictions.flatten("F")
 
     def hess(self, f, data):
         """
@@ -98,7 +98,7 @@ class MultiClassificationMixin:
             LGBM dataset with labels of dimension (n,) in (0, ..., n_classes - 1).
         """
         predictions = self.predictions(f).flatten("F")
-        return predictions * (1.0 - predictions)
+        return 1 / self.factor * predictions * (1.0 - predictions)
 
 
 class ClassificationMixin:
