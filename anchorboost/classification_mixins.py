@@ -4,7 +4,7 @@ import numpy as np
 class MultiClassificationMixin:
     def __init__(self, n_classes):
         self.n_classes = n_classes
-        self.factor = n_classes / (n_classes - 1)
+        self.factor = (n_classes - 1) / n_classes
 
     def init_score(self, y):
         """Initial score for LGBM.
@@ -98,7 +98,7 @@ class MultiClassificationMixin:
             LGBM dataset with labels of dimension (n,) in (0, ..., n_classes - 1).
         """
         predictions = self.predictions(f).flatten("F")
-        return self.factor * predictions * (1.0 - predictions)
+        return 1 / self.factor * predictions * (1.0 - predictions)
 
 
 class ClassificationMixin:
