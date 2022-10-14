@@ -42,7 +42,7 @@ def test_multi_classification_mixin():
 
     hess_approx = np.diag(approx_fprime(f, lambda f_: loss.grad(f_, data), 1e-5))
     hess = loss.hess(f, data)
-    np.testing.assert_allclose(loss.factor * hess_approx, hess, rtol=5e-4, atol=5e-4)
+    np.testing.assert_allclose(hess_approx, loss.factor * hess, rtol=5e-4, atol=5e-4)
 
 
 @pytest.mark.parametrize("y", [[0, 1, 3, 2, 2], [1, 1, 1, 0, 1]])
@@ -73,7 +73,7 @@ def test_negative_log_likelihood_classification(y, f):
     data = lgb.Dataset(np.ones(len(y)), y)
     np.testing.assert_almost_equal(
         -loss.loss(f, data),
-        np.log(loss.predictions(f)[loss._indices(y)]),
+        loss.factor * np.log(loss.predictions(f)[loss._indices(y)]),
     )
 
 
