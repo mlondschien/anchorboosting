@@ -90,12 +90,18 @@ class AnchorLiuClassificationObjective(AnchorMixin, ClassificationMixin, LGBMMix
         return -f + y * (1 + np.exp(-y * f)) * np.log1p(np.exp(y * f))
 
     def loss(self, f, data):
+        if self.gamma == 1:
+            return super().loss(f, data)
+
         return (
             super().loss(f, data)
             + (self.gamma - 1) * self._proj(data.anchor, self.residuals(f, data)) ** 2
         )
 
     def grad(self, f, data):
+        if self.gamma == 1:
+            return super().grad(f, data)
+
         y = 2 * data.get_label() - 1
         residuals = self.residuals(f, data)
         proj_residuals = self._proj(data.anchor, residuals)
@@ -103,6 +109,51 @@ class AnchorLiuClassificationObjective(AnchorMixin, ClassificationMixin, LGBMMix
         return super().grad(f, data) - 2 * (self.gamma - 1) * proj_residuals * np.exp(
             -y * f
         ) * np.log1p(np.exp(y * f))
+
+
+class AnchorHSICRegressionObjective(AnchorMixin, RegressionMixin, LGBMMixin):
+    def __init__(self, gamma, n_components=100, random_fourier_features_seed=0):
+        self.gamma = gamma
+        self.n_components = n_components
+        self.random_fourier_features_seed = random_fourier_features_seed
+        self.name = "HSIC anchor regression"
+
+    def residuals(self, f, data):
+        return data.get_label() - f
+
+    def loss(self, f, data):
+        if self.gamma == 1:
+            return super().loss(f, data)
+
+        fourier_residuals, _ = self._fourier_residuals(f, data)
+        proj_residuals = self._proj(data.anchor, fourier_residuals)
+        return (
+            super().loss(f, data) + (self.gamma - 1) * (proj_residuals**2).sum(axis=1)
+        ) / max(self.gamma, 1)
+
+    def grad(self, f, data):
+        if self.gamma == 1:
+            return super().grad(f, data)
+
+        fourier_residuals, fourier_derivative = self._fourier_residuals(f, data)
+        derivative = self._proj(data.anchor, fourier_residuals) * fourier_derivative
+
+        return (
+            super().grad(f, data) - 2 * (self.gamma - 1) * derivative.sum(axis=1)
+        ) / max(self.gamma, 1)
+
+    def _fourier_residuals(self, f, data):
+        rng = np.random.RandomState(self.random_fourier_features_seed)
+        residuals = self.residuals(f, data)
+        random_weights = rng.normal(size=(1, self.n_components))
+        offset = rng.uniform(size=(1, self.n_components)) * 2 * np.pi
+        weight_matrix = residuals.reshape(-1, 1) * random_weights + offset
+
+        fourier_residuals = np.cos(weight_matrix) * np.sqrt(2 / self.n_components)
+        fourier_derivative = (
+            -np.sin(weight_matrix) * random_weights * np.sqrt(2 / self.n_components)
+        )
+        return fourier_residuals, fourier_derivative
 
 
 class AnchorRegressionObjective(AnchorMixin, RegressionMixin, LGBMMixin):
@@ -114,11 +165,19 @@ class AnchorRegressionObjective(AnchorMixin, RegressionMixin, LGBMMixin):
         return data.get_label() - f
 
     def loss(self, f, data):
+        if self.gamma == 1:
+            return super().loss(f, data)
+
         return (
             super().loss(f, data)
             + (self.gamma - 1) * self._proj(data.anchor, self.residuals(f, data)) ** 2
-        )
+        ) / max(self.gamma, 1)
 
     def grad(self, f, data):
+        if self.gamma == 1:
+            return super().grad(f, data)
+
         proj_residuals = self._proj(data.anchor, self.residuals(f, data))
-        return super().grad(f, data) - 2 * (self.gamma - 1) * proj_residuals
+        return (super().grad(f, data) - 2 * (self.gamma - 1) * proj_residuals) / max(
+            self.gamma, 1
+        )
