@@ -18,7 +18,8 @@ class AnchorMixin:
         np.ndarray of dimension (n, d_f) or (n,)
             Projection of f onto the subspace spanned by anchor. Same dimension as f.
         """
-        if anchor.shape[1] == 1 and anchor.dtype == int:
+        # Checking for equality doesn't work if, e.g., anchor.dtype = np.int16
+        if anchor.shape[1] == 1 and "int" in str(anchor.dtype):
             out = np.zeros(f.shape)
             for unique_value in np.unique(anchor):
                 mask = (anchor == unique_value).flatten()
