@@ -27,7 +27,7 @@ I.e., the boosting algorithm will train $K$ trees in each set.
 Consider a setup with observations $x_i \in \mathbb{R}^p$ with outcomes $y_i \in \{-1, 1\}$ for $i=1, \ldots, n$. 
 We assign raw scores $f_i \in \mathbb{R}$ to each observation and use the expit to obtain probability predictions.
 The estimated probability of observation $x_i$ with raw score $f_i$ to belong to class 1 is $p_i = \frac{e^f}{1 + e^f} = (1 + e^{-f})^{-1}$.
-The log-likelihood of raw scores $f=(f_i)_{i=1}^n$ is
+The log-likelihood of raw scores $`f=(f_i)_{i=1}^n`$ is
 
 $$\ell(f, y) = -\sum_{i=1}^n \log(1 + e^{-yf}).$$
 
@@ -37,7 +37,7 @@ $$
 \frac{d}{d f_i} \ell(f, y) = y \frac{e^{-yf}}{1 + e^{-yf}} =
 \begin{cases}
 1 - p & y = 1 \\
-- p & y = 0
+-p & y = 0
 \end{cases}
 $$
 
@@ -50,22 +50,24 @@ $$
 ### Multiclass classification
 Consider a setup with observations $x_i \in \mathbb{R}^p$ with outcomes $y_i \in \{1, \ldots, K\}$ for $i=1, \ldots, n$.
 We assign raw scores $f_i = (f_{i, 1}, \ldots, f_{i, K}) \in \mathbb{R}^K$ to each observation and use cross-entropy to obtain probability predictions.
-For $k = 1, \ldots, K$ and $i=1, \ldots, n$ the estimated probability of observation $x_i$ with raw score $f_i$ to belong to class $k$ is $p_{i, k} := \exp(f_{i, k}) / \sum_{j=1}^K \exp(f_{i, j})$. The log-likelihood of raw scores $(f_i)_{i=1}^n$ is then 
-$$\ell\left((f_{i, k})_{i=1, \ldots, n}^{k=1, \ldots, K}, (y_i)_{i=1}^n\right) = \sum_{i=1}^n \left(f_{i, y} - \log\left(\sum_{j=1}^K \exp(f_{i,j})\right)\right).$$
+For $k = 1, \ldots, K$ and $i=1, \ldots, n$ the estimated probability of observation $x_i$ with raw score $f_i$ to belong to class $k$ is $p_{i, k} := \exp(f_{i, k}) / \sum_{j=1}^K \exp(f_{i, j})$. The log-likelihood of raw scores $`(f_i)_{i=1}^n`$ is then
+```math
+\ell\left((f_{i, k})_{i=1, \ldots, n}^{k=1, \ldots, K}, (y_i)_{i=1}^n\right) = \sum_{i=1}^n \left(f_{i, y} - \log\left(\sum_{j=1}^K \exp(f_{i,j})\right)\right).
+```
 
 The gradient of the log-likelihood is
 
 $$
 \frac{d}{df_{i, k}} \ell(f, y) = \begin{cases}
 1 - p_{i, k} &  y_i = k \\
-- p_{i, k} &  y_i \neq k \\
+-p_{i, k} &  y_i \neq k \\
 \end{cases}
 $$
 
 The (diagonal of the) Hessian of the log-likelihood is
-$$
-\frac{d^2}{d^2f_{i, k}} \ell(f, y) = (1 - p_{i, k}) p_{i, k}
-$$
+```math
+\frac{d^2}{d^2 f_{i, k}} \ell(f, y) = (1 - p_{i, k}) p_{i, k}
+```
 
 ## Anchorized classification
 
@@ -97,7 +99,7 @@ Note that again $y \in \{-1, 1\}$.
 $$r_i = \frac{d}{d f}(\ell(f, y)) = y \frac{e^{-yf}}{1 + e^{-yf}} =
 \begin{cases}
 1 - p & y = 1 \\
-- p & y = 0
+-p & y = 0
 \end{cases}
 $$
 
@@ -123,12 +125,14 @@ $$
 
 We combine the notions of [1, 2, 3].
 Motivated by [3], define residuals 
-$$r_{i, k} =
+```math
+r_{i, k} =
 \frac{d}{df_{i, k}} \ell(f, y) =
  \begin{cases}
 1 - p_{i, k} &  y_i = k \\
-- p_{i, k} &  y_i \neq k
-\end{cases}$$
+-p_{i, k} &  y_i \neq k
+\end{cases}
+```
 such that for all $i$ we have $\sum_{k} r_{i, k} = 0$.
 
 For some tuning parameter $\gamma$, we add the regularization term $(\gamma - 1) \| \pi_A r \|_2^2$ to our optimization problem.
@@ -144,25 +148,24 @@ $$
 \frac{d}{d f_{i, k}} \frac{\exp(f_{i, j})}{\sum_l \exp(f_{i, l})} =
 \begin{cases}
 \frac{\exp(f_{i, k})}{\sum_l \exp(f_{i, l})} - \frac{\exp(f_{i, k})^2}{(\sum_l \exp(f_{i, l}))^2} & j = k \\
- - \frac{\exp(f_{i, k})\exp{(f_{i, j})}}{(\sum_l \exp(f_{i, l}))^2} & j \neq k
-\end{cases}
-=
+-\frac{\exp(f_{i, k})\exp{(f_{i, j})}}{(\sum_l \exp(f_{i, l}))^2} & j \neq k
+\end{cases} =
 \begin{cases}
 p_{i, j} - p_{i, j}p_{i, k} & j = k \\
-- p_{i, j} p_{i, k} & j \neq k
+-p_{i, j} p_{i, k} & j \neq k
 \end{cases}.
 $$
 
 Then,
 
-$$
+```math
 \frac{d}{d f_{i, k}} \| \pi_A r\|_2^2 = 2 \pi_A r \cdot \left(\begin{cases}
 p_{i, j} - p_{i, j}p_{i, k} & l=i, j = k \\
-- p_{i, j} p_{i, k} & l=i, j \neq k \\
+-p_{i, j} p_{i, k} & l=i, j \neq k \\
 0 & l \neq i
 \end{cases}\right)_{l=1, \ldots, n}^{j=1, \ldots K}
-= (\pi_A r)_{i, k} \ p_{i, k} - \sum_{l=1}^K (\pi_A r)_{i, l} \ p_{i, l}.
-$$
+=(\pi_A r)_{i, k} \ p_{i, k} - \sum_{l=1}^K (\pi_A r)_{i, l} \ p_{i, l}.
+```
 
 <!---
 The diagonal of the hessian is equal to 
