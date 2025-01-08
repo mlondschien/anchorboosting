@@ -1,15 +1,15 @@
 import numpy as np
 
-from anchorboost.anchor_mixins import AnchorMixin
 from anchorboost.classification_mixins import (
     ClassificationMixin,
     MultiClassificationMixin,
 )
 from anchorboost.lgbm_mixins import LGBMMixin
 from anchorboost.regression_mixins import RegressionMixin
+from anchorboost.utils import proj
 
 
-class AnchorKookClassificationObjective(AnchorMixin, ClassificationMixin, LGBMMixin):
+class AnchorKookClassificationObjective(ClassificationMixin, LGBMMixin):
     def __init__(self, gamma, center_residuals=False):
         self.gamma = gamma
         self.center_residuals = center_residuals
@@ -24,12 +24,12 @@ class AnchorKookClassificationObjective(AnchorMixin, ClassificationMixin, LGBMMi
     def loss(self, f, data):
         return (
             super().loss(f, data)
-            + (self.gamma - 1) * self._proj(data.anchor, self.residuals(f, data)) ** 2
+            + (self.gamma - 1) * proj(data.anchor, self.residuals(f, data)) ** 2
         )
 
     def grad(self, f, data):
         predictions = self.predictions(f)
-        proj_residuals = self._proj(data.anchor, self.residuals(f, data))
+        proj_residuals = proj(data.anchor, self.residuals(f, data))
 
         if self.center_residuals:
             proj_residuals -= proj_residuals.mean()
@@ -39,9 +39,7 @@ class AnchorKookClassificationObjective(AnchorMixin, ClassificationMixin, LGBMMi
         ) * proj_residuals * predictions * (1 - predictions)
 
 
-class AnchorKookMultiClassificationObjective(
-    AnchorMixin, MultiClassificationMixin, LGBMMixin
-):
+class AnchorKookMultiClassificationObjective(MultiClassificationMixin, LGBMMixin):
     def __init__(self, gamma, n_classes, center_residuals=False):
         self.gamma = gamma
         self.center_residuals = center_residuals
@@ -58,8 +56,8 @@ class AnchorKookMultiClassificationObjective(
 
     def loss(self, f, data):
         residuals = self.residuals(f, data).reshape((-1, self.n_classes), order="F")
-        proj_residuals = self._proj(data.anchor, residuals)
-        # Multiply with factor to align two-class classification with
+        proj_residuals = proj(data.anchor, residuals)
+        # Multiply with self.factor to align two-class classification with
         # AnchorKookClassificationObjective
         return super().loss(f, data) + self.factor * (self.gamma - 1) * np.sum(
             proj_residuals**2, axis=1
@@ -67,7 +65,7 @@ class AnchorKookMultiClassificationObjective(
 
     def grad(self, f, data):
         residuals = self.residuals(f, data).reshape((-1, self.n_classes), order="F")
-        proj_residuals = self._proj(data.anchor, residuals)
+        proj_residuals = proj(data.anchor, residuals)
 
         if self.center_residuals:
             proj_residuals -= proj_residuals.mean(axis=0, keepdims=True)
@@ -80,7 +78,7 @@ class AnchorKookMultiClassificationObjective(
         return super().grad(f, data) + anchor_grad.flatten("F")
 
 
-class AnchorLiuClassificationObjective(AnchorMixin, ClassificationMixin, LGBMMixin):
+class AnchorLiuClassificationObjective(ClassificationMixin, LGBMMixin):
     def __init__(self, gamma):
         self.gamma = gamma
         self.name = "liu anchor classification"
@@ -95,7 +93,7 @@ class AnchorLiuClassificationObjective(AnchorMixin, ClassificationMixin, LGBMMix
 
         return (
             super().loss(f, data)
-            + (self.gamma - 1) * self._proj(data.anchor, self.residuals(f, data)) ** 2
+            + (self.gamma - 1) * proj(data.anchor, self.residuals(f, data)) ** 2
         )
 
     def grad(self, f, data):
@@ -104,14 +102,14 @@ class AnchorLiuClassificationObjective(AnchorMixin, ClassificationMixin, LGBMMix
 
         y = 2 * data.get_label() - 1
         residuals = self.residuals(f, data)
-        proj_residuals = self._proj(data.anchor, residuals)
+        proj_residuals = proj(data.anchor, residuals)
 
         return super().grad(f, data) - 2 * (self.gamma - 1) * proj_residuals * np.exp(
             -y * f
         ) * np.log1p(np.exp(y * f))
 
 
-class AnchorHSICRegressionObjective(AnchorMixin, RegressionMixin, LGBMMixin):
+class AnchorHSICRegressionObjective(RegressionMixin, LGBMMixin):
     def __init__(self, gamma, n_components=100, random_fourier_features_seed=0):
         self.gamma = gamma
         self.n_components = n_components
@@ -126,7 +124,7 @@ class AnchorHSICRegressionObjective(AnchorMixin, RegressionMixin, LGBMMixin):
             return super().loss(f, data)
 
         fourier_residuals, _ = self._fourier_residuals(f, data)
-        proj_residuals = self._proj(data.anchor, fourier_residuals)
+        proj_residuals = proj(data.anchor, fourier_residuals)
         return (
             super().loss(f, data) + (self.gamma - 1) * (proj_residuals**2).sum(axis=1)
         ) / max(self.gamma, 1)
@@ -136,7 +134,7 @@ class AnchorHSICRegressionObjective(AnchorMixin, RegressionMixin, LGBMMixin):
             return super().grad(f, data)
 
         fourier_residuals, fourier_derivative = self._fourier_residuals(f, data)
-        derivative = self._proj(data.anchor, fourier_residuals) * fourier_derivative
+        derivative = proj(data.anchor, fourier_residuals) * fourier_derivative
 
         return (
             super().grad(f, data) - 2 * (self.gamma - 1) * derivative.sum(axis=1)
@@ -156,7 +154,7 @@ class AnchorHSICRegressionObjective(AnchorMixin, RegressionMixin, LGBMMixin):
         return fourier_residuals, fourier_derivative
 
 
-class AnchorRegressionObjective(AnchorMixin, RegressionMixin, LGBMMixin):
+class AnchorRegressionObjective(RegressionMixin, LGBMMixin):
     def __init__(self, gamma):
         self.gamma = gamma
         self.name = "anchor regression"
@@ -170,14 +168,14 @@ class AnchorRegressionObjective(AnchorMixin, RegressionMixin, LGBMMixin):
 
         return (
             super().loss(f, data)
-            + (self.gamma - 1) * self._proj(data.anchor, self.residuals(f, data)) ** 2
+            + (self.gamma - 1) * proj(data.anchor, self.residuals(f, data)) ** 2
         ) / max(self.gamma, 1)
 
     def grad(self, f, data):
         if self.gamma == 1:
             return super().grad(f, data)
 
-        proj_residuals = self._proj(data.anchor, self.residuals(f, data))
+        proj_residuals = proj(data.anchor, self.residuals(f, data))
         return (super().grad(f, data) - 2 * (self.gamma - 1) * proj_residuals) / max(
             self.gamma, 1
         )
