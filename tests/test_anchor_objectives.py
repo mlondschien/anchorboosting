@@ -127,17 +127,19 @@ def test_compare_kook_anchor_classifications(gamma, center_residuals):
     multi_data.anchor = a
 
     single_model = lgb.train(
-        params={"learning_rate": 0.1, "objective": "binary"},
+        params={"learning_rate": 0.1, "objective": single_loss.objective},
         train_set=single_data,
         num_boost_round=10,
-        fobj=single_loss.objective,
     )
 
     multi_model = lgb.train(
-        params={"learning_rate": 0.1, "num_class": 2},
+        params={
+            "learning_rate": 0.1,
+            "num_class": 2,
+            "objective": multi_loss.objective,
+        },
         train_set=multi_data,
         num_boost_round=10,
-        fobj=multi_loss.objective,
     )
 
     single_pred = single_model.predict(X)

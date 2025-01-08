@@ -59,17 +59,20 @@ def test_classification_to_lgbm(parameters):
     )
 
     my_model = lgb.train(
-        params={"learning_rate": 0.1, **parameters},
+        params={"learning_rate": 0.1, "objective": loss.objective, **parameters},
         train_set=data,
         num_boost_round=10,
-        fobj=loss.objective,
     )
 
     my_multi_model = lgb.train(
-        params={"learning_rate": 0.1, "num_class": 2, **parameters},
+        params={
+            "learning_rate": 0.1,
+            "num_class": 2,
+            "objective": multi_loss.objective,
+            **parameters,
+        },
         train_set=multi_data,
         num_boost_round=10,
-        fobj=multi_loss.objective,
     )
 
     lgb_pred = lgb_model.predict(X)
@@ -99,10 +102,9 @@ def test_multi_classification_to_lgbm():
     )
 
     my_model = lgb.train(
-        params={"learning_rate": 0.1, "num_class": 3},
+        params={"learning_rate": 0.1, "num_class": 3, "objective": loss.objective},
         train_set=data,
         num_boost_round=10,
-        fobj=loss.objective,
     )
 
     lgb_pred = lgb_model.predict(X)
@@ -140,10 +142,9 @@ def test_regression_to_lgbm(parameters):
     )
 
     my_model = lgb.train(
-        params={"learning_rate": 0.1, **parameters},
+        params={"learning_rate": 0.1, "objective": loss.objective, **parameters},
         train_set=data,
         num_boost_round=10,
-        fobj=loss.objective,
     )
 
     lgb_pred = lgb_model.predict(X)

@@ -3,8 +3,12 @@ channels:
   - conda-forge
   - nodefaults
 dependencies:
-  - python >=3.7
+  - python >=3.9
   - pytest
   - numpy >=1.19.0
   - matplotlib
-  - lightgbm
+  - lightgbm >=4.0.0
+  - pip
+  - setuptools
+  - pytest-cov
+  - scikit-learn
