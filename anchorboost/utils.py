@@ -41,10 +41,10 @@ def proj(Z, *args, categorical_Z=False):
         return (*(np.zeros_like(f) for f in args),)
 
     if categorical_Z:
-        if Z.shape[1] != 1 or "int" not in str(Z.dtype):
+        if Z.shape[1] != 1 or "float" in str(Z.dtype):
             raise ValueError(
-                "If categorical_Z=True, then Z should be a single column of integers. "
-                f"Got shape {Z.shape} and dtype {Z.dtype}."
+                "If categorical_Z=True, then Z should be a single column of integers "
+                f"or string. Got shape {Z.shape} and dtype {Z.dtype}."
             )
         out = [np.zeros_like(a, dtype="float") for a in args]
         for unique_value in np.unique(Z):
