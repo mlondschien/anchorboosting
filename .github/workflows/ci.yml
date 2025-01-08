@@ -9,31 +9,36 @@ name: CI
 jobs:
 
   test:
-    name: Unittests - ${{ matrix.PYTHON_VERSION }}
+    name: Unit tests - ${{ matrix.PYTHON_VERSION }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        PYTHON_VERSION: ["3.9"]
-
+        PYTHON_VERSION: ["3.12"]
+    defaults:
+      run:
+        # see https://github.com/conda-incubator/setup-miniconda/#important
+        shell: bash -l {0}
     steps:
-      - name: Checkout branch
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
+      - name: Set up micromamba
+        uses: mamba-org/setup-micromamba@d05808540d968a55ca33c798e0661fb98f533c73
         with:
-          ref: ${{ github.head_ref }}
-
-      - uses: conda-incubator/setup-miniconda@v2
-        with:
-          miniforge-variant: Mambaforge
-          use-mamba: true
-          python-version: ${{ matrix.PYTHON_VERSION }}
+          micromamba-version: 1.5.10-0
+          cache-env: true
           environment-file: environment.yml
-
-      - name: Run the unittests
-        shell: bash -x -l {0}
-        run: |
-          pip install --no-deps .
-          pytest tests
+          extra-specs: |
+            python=${{ matrix.PYTHON_VERSION }}
+      - name: Install repository
+        run: python -m pip install --no-build-isolation --no-deps --disable-pip-version-check -e .
+      - name: Pytest
+        run: pytest --cov --cov-report xml tests
+      - name: codecov
+        uses: codecov/codecov-action@v4.3.1
+        with:
+          file: ./coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          name: pytest-python${{ matrix.PYTHON_VERSION }}
 
 
   pre-commit-checks:
