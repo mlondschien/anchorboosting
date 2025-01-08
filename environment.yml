@@ -9,3 +9,4 @@ dependencies:
   - matplotlib
   - lightgbm >=4.0.0
   - pip
+  - setuptools
