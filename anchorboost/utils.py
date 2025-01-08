@@ -46,18 +46,18 @@ def proj(Z, *args, categorical_Z=False):
                 "If categorical_Z=True, then Z should be a single column of integers "
                 f"or string. Got shape {Z.shape} and dtype {Z.dtype}."
             )
-        out = [np.zeros_like(a, dtype="float") for a in args]
+        # out = [np.zeros_like(a, dtype="float") for a in args]
         for unique_value in np.unique(Z):
             mask = (Z == unique_value).flatten()
             for i, f in enumerate(args):
                 if len(f.shape) == 1:
-                    out[i][mask] = f[mask].mean()
+                    f[mask] = f[mask].mean()
                 else:
-                    out[i][mask, :] = f[mask, :].mean(axis=0)
+                    f[mask, :] = f[mask, :].mean(axis=0)
 
         if len(args) == 1:
-            return out[0]
-        return tuple(out)
+            return args[0]
+        return tuple(args)
 
     for f in args:
         if len(f.shape) > 2:

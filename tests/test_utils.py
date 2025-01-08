@@ -8,32 +8,32 @@ from anchorboost.utils import proj
 cases = [
     (
         np.array([[0], [0], [1]]),
-        np.array([[1], [2], [3]]),
+        np.array([[1.0], [2.0], [3.0]]),
         np.array([[1.5], [1.5], [3]]),
     ),
     (
         np.array([[2], [2], [1], [3]]),
-        np.array([[1], [2], [3], [1]]),
+        np.array([[1.0], [2.0], [3.0], [1.0]]),
         np.array([[1.5], [1.5], [3], [1]]),
     ),
     (
         np.array([[1], [1], [0]]),
-        np.array([[1, 2], [0, 2], [3, 4]]),
+        np.array([[1.0, 2.0], [0.0, 2.0], [3.0, 4.0]]),
         np.array([[0.5, 2.0], [0.5, 2.0], [3.0, 4.0]]),
     ),
     (
         np.array([[1], [1], [0]]),
-        np.array([1, 0, 3]),
+        np.array([1.0, 0.0, 3.0]),
         np.array([0.5, 0.5, 3]),
     ),
     (
         np.array([[1], [1], [0]]),
-        np.array([[1, 2], [0, 2], [3, 4]]),
+        np.array([[1.0, 2.0], [0.0, 2.0], [3.0, 4.0]]),
         np.array([[0.5, 2.0], [0.5, 2.0], [3.0, 4.0]]),
     ),
     (
         np.array([[2], [2], [1]]),
-        np.array([[1, 2], [0, 2], [3, 4]]),
+        np.array([[1.0, 2.0], [0.0, 2.0], [3.0, 4.0]]),
         np.array([[0.5, 2.0], [0.5, 2.0], [3.0, 4.0]]),
     ),
     (np.array([[0]]), np.array([[1]]), np.array([[1]])),
@@ -50,7 +50,7 @@ def test_proj_result(one_hot, anchor, residuals, result):
         anchor = encoder.fit_transform(anchor).astype(float)
 
     np.testing.assert_almost_equal(
-        proj(anchor, residuals, categorical_Z=not one_hot), result
+        proj(anchor, residuals.copy(), categorical_Z=not one_hot), result
     )
 
 
