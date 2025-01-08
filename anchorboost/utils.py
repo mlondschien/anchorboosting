@@ -18,7 +18,7 @@ except ImportError:
     _POLARS_INSTALLED = False
 
 
-def proj(Z, *args, categorical_Z=False):
+def proj(Z, *args, categories=None):
     """Project f onto the subspace spanned by Z.
 
     Parameters
@@ -27,9 +27,9 @@ def proj(Z, *args, categorical_Z=False):
         The Z matrix. If None, returns np.zeros_like(f).
     *args: np.ndarrays of dimension (n, d_f) or (n,)
         vector or matrices to project.
-    categorical_Z: bool, default=False
-        If True, then Z is assumed to be categorical and the projection is done by
-        averaging the values of f within each category.
+    categories: np.ndarray of dimension (n_categories,), optional, default=None
+        If not None, then Z is assumed to be categorical with categories `categoreis`.
+        The projection is done by averaging the values of f within each category.
 
     Returns
     -------
@@ -40,15 +40,16 @@ def proj(Z, *args, categorical_Z=False):
     if Z is None:
         return (*(np.zeros_like(f) for f in args),)
 
-    if categorical_Z:
+    if categories is not None:
         if (len(Z.shape) != 1 and Z.shape[1] != 1) or "float" in str(Z.dtype):
             raise ValueError(
                 "If categorical_Z=True, then Z should be a single column of integers "
                 f"or string. Got shape {Z.shape} and dtype {Z.dtype}."
             )
         # out = [np.zeros_like(a, dtype="float") for a in args]
-        for unique_value in np.unique(Z):
-            mask = (Z == unique_value).flatten()
+        for category in categories:
+            mask = Z == category
+            mask = mask.flatten()
             for i, f in enumerate(args):
                 if len(f.shape) == 1:
                     f[mask] = f[mask].mean()
