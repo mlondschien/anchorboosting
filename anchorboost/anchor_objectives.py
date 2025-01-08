@@ -166,6 +166,8 @@ class AnchorRegressionObjective(RegressionMixin, LGBMMixin):
         if self.gamma == 1:
             return super().loss(f, data)
 
+        # For gamma <= 1, this is equivalent to kappa := (gamma - 1) / gamma and
+        # loss = (1 - kappa) | y - f |^2 + kappa | P_Z (y - f) |^2
         return (
             super().loss(f, data)
             + (self.gamma - 1) * proj(data.anchor, self.residuals(f, data)) ** 2
