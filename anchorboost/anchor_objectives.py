@@ -37,7 +37,7 @@ class AnchorKookClassificationObjective(ClassificationMixin, LGBMMixin):
     def grad(self, f, data):
         predictions = self.predictions(f)
         proj_residuals = proj(
-            data.anchor, self.residuals(f, data, categorical_Z=self.categorical_anchor)
+            data.anchor, self.residuals(f, data), categorical_Z=self.categorical_anchor
         )
 
         if self.center_residuals:
