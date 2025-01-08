@@ -195,7 +195,7 @@ class AnchorRegressionObjective(RegressionMixin, LGBMMixin):
     def __init__(self, gamma, categorical_anchor=False):
         self.gamma = gamma
         self.name = "anchor regression"
-        self.categorical_anchor = False
+        self.categorical_anchor = categorical_anchor
 
     def residuals(self, f, data):
         return data.get_label() - f
