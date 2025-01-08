@@ -8,3 +8,4 @@ dependencies:
   - numpy >=1.19.0
   - matplotlib
   - lightgbm >=4.0.0
+  - pip
