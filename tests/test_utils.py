@@ -41,16 +41,19 @@ cases = [
 
 
 @pytest.mark.parametrize("anchor, residuals, result", cases)
-@pytest.mark.parametrize("one_hot", [True, False])
-def test_proj_result(one_hot, anchor, residuals, result):
-    if one_hot:
+@pytest.mark.parametrize("categorical", [True, False])
+def test_proj_result(categorical, anchor, residuals, result):
+    if not categorical:
         if anchor.shape[1] != 1:
             pytest.skip("one_hot only makes sense for 1D anchors")
         encoder = OneHotEncoder(sparse_output=False, drop=None)
         anchor = encoder.fit_transform(anchor).astype(float)
-
+        categories = None
+    else:
+        categories = np.unique(anchor)
+    
     np.testing.assert_almost_equal(
-        proj(anchor, residuals.copy(), categorical_Z=not one_hot), result
+        proj(anchor, residuals.copy(), categories=categories), result
     )
 
 
