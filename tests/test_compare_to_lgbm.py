@@ -3,12 +3,12 @@ import numpy as np
 import pytest
 
 from anchorboost import (
+    AnchorKookClassificationObjective,
+    AnchorRegressionObjective,
     ClassificationMixin,
     LGBMMixin,
     MultiClassificationMixin,
     RegressionMixin,
-    AnchorRegressionObjective,
-    AnchorKookClassificationObjective,
 )
 from anchorboost.simulate import f1, simulate
 
@@ -96,7 +96,6 @@ def test_multi_classification_to_lgbm():
 
     loss = MultiClassificationObjective(n_classes=3)
     data = lgb.Dataset(X, y, init_score=loss.init_score(y))
-
 
     lgb_model = lgb.train(
         params={"learning_rate": 0.1, "objective": "multiclass", "num_class": 3},

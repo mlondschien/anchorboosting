@@ -46,10 +46,9 @@ class AnchorKookClassificationObjective(ClassificationMixin, LGBMMixin):
         if self.center_residuals:
             proj_residuals -= proj_residuals.mean()
 
-        return (
-            super().grad(f, data)
-             + 2 * (self.gamma - 1) * proj_residuals * predictions * (1 - predictions)
-        )
+        return super().grad(f, data) + 2 * (
+            self.gamma - 1
+        ) * proj_residuals * predictions * (1 - predictions)
 
 
 class AnchorKookMultiClassificationObjective(MultiClassificationMixin, LGBMMixin):
@@ -110,7 +109,7 @@ class AnchorLiuClassificationObjective(ClassificationMixin, LGBMMixin):
             return super().loss(f, data)
 
         return (
-            (super().loss(f, data)
+            super().loss(f, data)
             + (self.gamma - 1)
             * proj(
                 data.anchor,
@@ -118,7 +117,7 @@ class AnchorLiuClassificationObjective(ClassificationMixin, LGBMMixin):
                 categories=self.categories,
             )
             ** 2
-        ))
+        )
 
     def grad(self, f, data):
         if self.gamma == 1:
@@ -128,10 +127,9 @@ class AnchorLiuClassificationObjective(ClassificationMixin, LGBMMixin):
         residuals = self.residuals(f, data)
         proj_residuals = proj(data.anchor, residuals, categories=self.categories)
 
-        return (
-            super().grad(f, data)
-         - 2 * (self.gamma - 1) * proj_residuals * np.exp(-y * f) * np.log1p(np.exp(y * f))
-        )
+        return super().grad(f, data) - 2 * (self.gamma - 1) * proj_residuals * np.exp(
+            -y * f
+        ) * np.log1p(np.exp(y * f))
 
 
 class AnchorHSICRegressionObjective(RegressionMixin, LGBMMixin):
@@ -163,9 +161,9 @@ class AnchorHSICRegressionObjective(RegressionMixin, LGBMMixin):
         proj_residuals = proj(
             data.anchor, fourier_residuals, categories=self.categories
         )
-        return (
-            super().loss(f, data) + 0.5 * (self.gamma - 1) * (proj_residuals**2).sum(axis=1)
-        )
+        return super().loss(f, data) + 0.5 * (self.gamma - 1) * (
+            proj_residuals**2
+        ).sum(axis=1)
 
     def grad(self, f, data):
         if self.gamma == 1:
@@ -177,9 +175,7 @@ class AnchorHSICRegressionObjective(RegressionMixin, LGBMMixin):
             * fourier_derivative
         )
 
-        return (
-            super().grad(f, data) - (self.gamma - 1) * derivative.sum(axis=1)
-        )
+        return super().grad(f, data) - (self.gamma - 1) * derivative.sum(axis=1)
 
     def _fourier_residuals(self, f, data):
         residuals = self.residuals(f, data)
@@ -187,7 +183,9 @@ class AnchorHSICRegressionObjective(RegressionMixin, LGBMMixin):
 
         fourier_residuals = np.cos(weight_matrix) * np.sqrt(2 / self.n_components)
         fourier_derivative = (
-            -np.sin(weight_matrix) * self.random_weights * np.sqrt(2 / self.n_components)
+            -np.sin(weight_matrix)
+            * self.random_weights
+            * np.sqrt(2 / self.n_components)
         )
         return fourier_residuals, fourier_derivative
 
@@ -212,7 +210,8 @@ class AnchorRegressionObjective(RegressionMixin, LGBMMixin):
         # loss = (1 - kappa) | y - f |^2 + kappa | P_Z (y - f) |^2
         return (
             super().loss(f, data)
-            + 0.5 * (self.gamma - 1)
+            + 0.5
+            * (self.gamma - 1)
             * proj(
                 data.anchor,
                 self.residuals(f, data),
@@ -228,7 +227,4 @@ class AnchorRegressionObjective(RegressionMixin, LGBMMixin):
         proj_residuals = proj(
             data.anchor, self.residuals(f, data), categories=self.categories
         )
-        return (
-            super().grad(f, data)
-            - (self.gamma - 1) * proj_residuals
-        )
+        return super().grad(f, data) - (self.gamma - 1) * proj_residuals
