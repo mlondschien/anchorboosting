@@ -228,3 +228,44 @@ class AnchorRegressionObjective(RegressionMixin, LGBMMixin):
             data.anchor, self.residuals(f, data), categories=self.categories
         )
         return super().grad(f, data) - (self.gamma - 1) * proj_residuals
+
+
+
+class AntiAnchorRegressionObjective(RegressionMixin, LGBMMixin):
+    def __init__(self, gamma, categories=None):
+        self.gamma = gamma
+        self.name = "anchor regression"
+        self.categories = categories
+
+    def residuals(self, f, data):
+        return data.get_label() - f
+
+    def loss(self, f, data):
+        if self.gamma == 1:
+            return super().loss(f, data)
+
+        if not hasattr(self, "_init_score"):
+            self._init_score = data.get_label().mean()
+    
+        # For gamma <= 1, this is equivalent to kappa := (gamma - 1) / gamma and
+        # loss = (1 - kappa) | y - f |^2 + kappa | P_Z (y - f) |^2
+        return (
+            super().loss(f, data)
+            + (self.gamma - 1)
+            * proj(
+                data.anchor,
+                f - self._init_score,
+                categories=self.categories,
+            )
+            ** 2
+        )#  / max(self.gamma, 1)
+
+    def grad(self, f, data):
+        if self.gamma == 1:
+            return super().grad(f, data)
+
+        if not hasattr(self, "_init_score"):
+            self._init_score = data.get_label().mean()
+
+        f_proj = proj(data.anchor, f - self._init_score, categories=self.categories)
+        return (super().grad(f, data) - 2 * (self.gamma - 1) * f_proj) # / max(self.gamma, 1)
