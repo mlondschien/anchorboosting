@@ -3,6 +3,8 @@ import numpy as np
 import pytest
 
 from anchorboost import (
+    AnchorKookClassificationObjective,
+    AnchorRegressionObjective,
     ClassificationMixin,
     LGBMMixin,
     MultiClassificationMixin,
