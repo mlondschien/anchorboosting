@@ -2,7 +2,7 @@ import lightgbm as lgb
 import numpy as np
 import pytest
 
-from anchorboost import (
+from anchorboosting import (
     AnchorKookClassificationObjective,
     AnchorRegressionObjective,
     ClassificationMixin,
@@ -10,7 +10,7 @@ from anchorboost import (
     MultiClassificationMixin,
     RegressionMixin,
 )
-from anchorboost.simulate import f1, simulate
+from anchorboosting.simulate import f1, simulate
 
 
 class ClassificationObjective(LGBMMixin, ClassificationMixin):

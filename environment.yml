@@ -1,4 +1,4 @@
-name: anchorboost
+name: anchorboosting.
 channels:
   - conda-forge
   - nodefaults

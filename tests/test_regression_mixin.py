@@ -2,8 +2,8 @@ import lightgbm as lgb
 import numpy as np
 from scipy.optimize import approx_fprime
 
-from anchorboost import RegressionMixin
-from anchorboost.simulate import f2, simulate
+from anchorboosting import RegressionMixin
+from anchorboosting.simulate import f2, simulate
 
 
 def test_classification_mixin():
