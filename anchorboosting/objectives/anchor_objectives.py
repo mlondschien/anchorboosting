@@ -1,11 +1,11 @@
 import numpy as np
 
-from anchorboosting.classification_mixins import (
+from anchorboosting.objectives.mixins import (
     ClassificationMixin,
+    LGBMMixin,
     MultiClassificationMixin,
+    RegressionMixin,
 )
-from anchorboosting.lgbm_mixins import LGBMMixin
-from anchorboosting.regression_mixins import RegressionMixin
 from anchorboosting.utils import proj
 
 

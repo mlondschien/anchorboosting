@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 from scipy.optimize import approx_fprime
 
-from anchorboosting import (
+from anchorboosting.objectives.anchor_objectives import (
     AnchorHSICRegressionObjective,
     AnchorKookClassificationObjective,
     AnchorKookMultiClassificationObjective,
