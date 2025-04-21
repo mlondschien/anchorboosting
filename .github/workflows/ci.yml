@@ -37,7 +37,7 @@ jobs:
 
 
   pre-commit-checks:
-    name: "Pre-commit checks - Python 3.9"
+    name: "Pre-commit checks - Python 3.12"
     runs-on: ubuntu-latest
   
     steps:
@@ -47,10 +47,10 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
   
-      - name: Install Python 3.9
+      - name: Install Python 3.12
         uses: actions/setup-python@v2
         with:
-          python-version: 3.9
+          python-version: 3.12
 
       - name: Run pre-commit checks
         uses: pre-commit/action@v2.0.0
