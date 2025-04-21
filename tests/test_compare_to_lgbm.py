@@ -2,15 +2,15 @@ import lightgbm as lgb
 import numpy as np
 import pytest
 
-from anchorboosting.boosting.mixins import (
+from anchorboosting.objectives.anchor_objectives import (
+    AnchorKookClassificationObjective,
+    AnchorRegressionObjective,
+)
+from anchorboosting.objectives.mixins import (
     ClassificationMixin,
     LGBMMixin,
     MultiClassificationMixin,
     RegressionMixin,
-)
-from anchorboosting.boosting.objectives import (
-    AnchorKookClassificationObjective,
-    AnchorRegressionObjective,
 )
 from anchorboosting.simulate import f1, simulate
 
