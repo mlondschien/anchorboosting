@@ -2,7 +2,7 @@ import lightgbm as lgb
 import numpy as np
 import pytest
 
-from anchorboosting import AnchorLiuClassificationObjective
+from anchorboosting.objectives.anchor_objectives import AnchorLiuClassificationObjective
 
 
 @pytest.mark.parametrize("y", [0, 1])
