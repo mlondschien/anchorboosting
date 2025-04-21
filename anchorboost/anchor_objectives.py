@@ -46,10 +46,9 @@ class AnchorKookClassificationObjective(ClassificationMixin, LGBMMixin):
         if self.center_residuals:
             proj_residuals -= proj_residuals.mean()
 
-        return (
-            super().grad(f, data)
-             + 2 * (self.gamma - 1) * proj_residuals * predictions * (1 - predictions)
-        )
+        return super().grad(f, data) + 2 * (
+            self.gamma - 1
+        ) * proj_residuals * predictions * (1 - predictions)
 
 
 class AnchorKookMultiClassificationObjective(MultiClassificationMixin, LGBMMixin):
@@ -110,7 +109,7 @@ class AnchorLiuClassificationObjective(ClassificationMixin, LGBMMixin):
             return super().loss(f, data)
 
         return (
-            (super().loss(f, data)
+            super().loss(f, data)
             + (self.gamma - 1)
             * proj(
                 data.anchor,
@@ -118,7 +117,7 @@ class AnchorLiuClassificationObjective(ClassificationMixin, LGBMMixin):
                 categories=self.categories,
             )
             ** 2
-        ))
+        )
 
     def grad(self, f, data):
         if self.gamma == 1:
@@ -128,10 +127,9 @@ class AnchorLiuClassificationObjective(ClassificationMixin, LGBMMixin):
         residuals = self.residuals(f, data)
         proj_residuals = proj(data.anchor, residuals, categories=self.categories)
 
-        return (
-            super().grad(f, data)
-         - 2 * (self.gamma - 1) * proj_residuals * np.exp(-y * f) * np.log1p(np.exp(y * f))
-        )
+        return super().grad(f, data) - 2 * (self.gamma - 1) * proj_residuals * np.exp(
+            -y * f
+        ) * np.log1p(np.exp(y * f))
 
 
 class AnchorHSICRegressionObjective(RegressionMixin, LGBMMixin):

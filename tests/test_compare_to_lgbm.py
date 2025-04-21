@@ -9,8 +9,6 @@ from anchorboost import (
     LGBMMixin,
     MultiClassificationMixin,
     RegressionMixin,
-    AnchorRegressionObjective,
-    AnchorKookClassificationObjective,
 )
 from anchorboost.simulate import f1, simulate
 
@@ -86,7 +84,6 @@ def test_multi_classification_to_lgbm():
     loss = MultiClassificationObjective(n_classes=3)
     data = lgb.Dataset(X, y, init_score=loss.init_score(y))
 
-
     lgb_model = lgb.train(
         params={"learning_rate": 0.1, "objective": "multiclass", "num_class": 3},
         train_set=data,
@@ -158,8 +155,6 @@ def test_regression_to_lgbm(parameters):
     np.testing.assert_allclose(pred0, pred2, rtol=1e-6)
 
 
-
-
 @pytest.mark.parametrize(
     "decay_rate",
     [0.0, 0.5, 1.0],
@@ -208,16 +203,31 @@ def test_compare_refit_to_lgbm(parameters, decay_rate):
         train_set=data2,
         num_boost_round=10,
     )
-    
+
     X_new, y_new, _ = simulate(f1, shift=1, seed=0)
-    model0 = model0.refit(data=X_new, label=y_new, decay_rate=decay_rate, init_score=loss1.init_score(y_new))
+    model0 = model0.refit(
+        data=X_new,
+        label=y_new,
+        decay_rate=decay_rate,
+        init_score=loss1.init_score(y_new),
+    )
     model1._Booster__set_objective_to_none = False
     model1.params["objective"] = "regression"
-    model1 = model1.refit(data=X_new, label=y_new, decay_rate=decay_rate, init_score=loss1.init_score(y_new))
+    model1 = model1.refit(
+        data=X_new,
+        label=y_new,
+        decay_rate=decay_rate,
+        init_score=loss1.init_score(y_new),
+    )
     model2._Booster__set_objective_to_none = False
     model2.params["objective"] = "regression"
-    model2 = model2.refit(data=X_new, label=y_new, decay_rate=decay_rate, init_score=loss2.init_score(y_new))
-    
+    model2 = model2.refit(
+        data=X_new,
+        label=y_new,
+        decay_rate=decay_rate,
+        init_score=loss2.init_score(y_new),
+    )
+
     pred0 = model0.predict(X_new)
     pred1 = model1.predict(X_new)
     pred2 = model2.predict(X_new)

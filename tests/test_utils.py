@@ -51,7 +51,7 @@ def test_proj_result(categorical, anchor, residuals, result):
         categories = None
     else:
         categories = np.unique(anchor)
-    
+
     np.testing.assert_almost_equal(
         proj(anchor, residuals.copy(), categories=categories), result
     )
