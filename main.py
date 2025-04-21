@@ -2,8 +2,8 @@ import lightgbm as lgb
 import matplotlib.pyplot as plt
 import numpy as np
 
-from anchorboost.anchor_loss import AnchorRegressionLoss
-from anchorboost.simulate import f1, simulate
+from anchorboosting.anchor_loss import AnchorRegressionLoss
+from anchorboosting.simulate import f1, simulate
 
 X_fit, y_fit, a_fit = simulate(f1, shift=0, seed=0)
 X_val, y_val, a_val = simulate(f1, shift=0, seed=1)

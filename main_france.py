@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from anchorboost.anchor_loss import AnchorClassificationLoss
+from anchorboosting.anchor_loss import AnchorClassificationLoss
 
 df = pd.read_csv("data/France_crop_type_data.csv").iloc[:, 1:]
 

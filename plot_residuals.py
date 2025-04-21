@@ -2,7 +2,7 @@ import lightgbm as lgb
 import matplotlib.pyplot as plt
 import numpy as np
 
-from anchorboost import (
+from anchorboosting import (
     AnchorKookClassificationObjective,
     AnchorLiuClassificationObjective,
 )

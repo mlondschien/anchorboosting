@@ -3,7 +3,7 @@ import pytest
 from scipy.linalg import norm
 from sklearn.preprocessing import OneHotEncoder
 
-from anchorboost.utils import proj
+from anchorboosting.utils import proj
 
 cases = [
     (

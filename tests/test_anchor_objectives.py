@@ -3,14 +3,14 @@ import numpy as np
 import pytest
 from scipy.optimize import approx_fprime
 
-from anchorboost import (
+from anchorboosting import (
     AnchorHSICRegressionObjective,
     AnchorKookClassificationObjective,
     AnchorKookMultiClassificationObjective,
     AnchorLiuClassificationObjective,
     AnchorRegressionObjective,
 )
-from anchorboost.simulate import f2, simulate
+from anchorboosting.simulate import f2, simulate
 
 
 @pytest.mark.parametrize("center_residuals", [True, False])

@@ -3,8 +3,8 @@ import numpy as np
 import pytest
 from scipy.optimize import approx_fprime
 
-from anchorboost import ClassificationMixin, MultiClassificationMixin
-from anchorboost.simulate import f2, simulate
+from anchorboosting import ClassificationMixin, MultiClassificationMixin
+from anchorboosting.simulate import f2, simulate
 
 
 def test_classification_mixin():

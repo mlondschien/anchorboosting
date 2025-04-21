@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-from anchorboost.anchor_loss import AnchorRegressionLoss
+from anchorboosting.anchor_loss import AnchorRegressionLoss
 
 rng = np.random.default_rng(0)
 n = 200
