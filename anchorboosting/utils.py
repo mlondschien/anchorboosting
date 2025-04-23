@@ -3,33 +3,30 @@
 import numpy as np
 import scipy
 
-try:
-    import pandas as pd
 
-    _PANDAS_INSTALLED = True
-except ImportError:
-    _PANDAS_INSTALLED = False
+def proj(Z, *args, n_categories=None, copy=False):
+    """
+    Project f onto the subspace spanned by Z.
 
-try:
-    import polars as pl
-
-    _POLARS_INSTALLED = True
-except ImportError:
-    _POLARS_INSTALLED = False
-
-
-def proj(Z, *args, categories=None):
-    """Project f onto the subspace spanned by Z.
+    If `Z` is a matrix of floats, uses a copy of `ivmodel`'s `proj:
+    https://github.com/mlondschien/ivmodels/blob/main/ivmodels/utils.py#L12
+    If `Z` is a 1d array of unsigned integers, assumes that `Z` is categorical with
+    values 0, 1, ..., n_categories-1. In this case, the `n_categories` argument must be
+    be supplied. The projection is done by averaging the values of f within each
+    category. If `Z` is None, returns np.zeros_like(f).
 
     Parameters
     ----------
-    Z: np.ndarray of dimension (n, d_Z)
-        The Z matrix. If None, returns np.zeros_like(f).
+    Z: np.ndarray of dimension (n, d_Z) or (n,)
+        The `Z` matrix or 1d array of integers. If None, returns np.zeros_like(f).
     *args: np.ndarrays of dimension (n, d_f) or (n,)
-        vector or matrices to project.
-    categories: np.ndarray of dimension (n_categories,), optional, default=None
-        If not None, then Z is assumed to be categorical with categories `categoreis`.
-        The projection is done by averaging the values of f within each category.
+        Vectors or matrices to project.
+    n_categories: int, optional, default=None
+        If not None, then Z is assumed to be categorical with categories 0, 1, ...,
+        n_categories-1. The projection is done by averaging the values of f within each
+        category.
+    copy: bool, default=False
+        If False, overwrites *args.
 
     Returns
     -------
@@ -40,26 +37,6 @@ def proj(Z, *args, categories=None):
     if Z is None:
         return (*(np.zeros_like(f) for f in args),)
 
-    if categories is not None:
-        if (len(Z.shape) != 1 and Z.shape[1] != 1) or "float" in str(Z.dtype):
-            raise ValueError(
-                "If categorical_Z=True, then Z should be a single column of integers "
-                f"or string. Got shape {Z.shape} and dtype {Z.dtype}."
-            )
-        # out = [np.zeros_like(a, dtype="float") for a in args]
-        for category in categories:
-            mask = Z == category
-            mask = mask.flatten()
-            for i, f in enumerate(args):
-                if len(f.shape) == 1:
-                    f[mask] = f[mask].mean()
-                else:
-                    f[mask, :] = f[mask, :].mean(axis=0)
-
-        if len(args) == 1:
-            return args[0]
-        return tuple(args)
-
     for f in args:
         if len(f.shape) > 2:
             raise ValueError(
@@ -67,6 +44,47 @@ def proj(Z, *args, categories=None):
             )
         if f.shape[0] != Z.shape[0]:
             raise ValueError(f"Shape mismatch: Z.shape={Z.shape}, f.shape={f.shape}.")
+
+    if n_categories is not None:
+        if copy:
+            fs = [np.zeros_like(f) for f in args]
+        else:
+            fs = args
+
+        if len(Z.shape) != 1 or Z.dtype != int:
+            raise ValueError(
+                "If n_categories is not None, then Z should be a single column of "
+                f"integers. Got shape {Z.shape} and dtype {Z.dtype}."
+            )
+
+        for i, f in enumerate(args):
+            if len(f.shape) == 1:
+                means = np.zeros((n_categories,))
+                counts = np.zeros(n_categories)
+
+                # np.add.at(a, indices, b) is equivalent to a[indices] += b
+                np.add.at(means, Z, f)
+                np.add.at(counts, Z, 1)
+
+                means[counts > 0] = means[counts > 0] / counts[counts > 0]
+
+                fs[i][:] = means[Z]
+            else:
+                means = np.zeros((n_categories, f.shape[1]))
+                counts = np.zeros(n_categories)
+
+                # np.add.at(a, indices, b) is equivalent to a[indices] += b
+                np.add.at(means, Z, f)
+                np.add.at(counts, Z, 1)
+
+                means[counts > 0, :] = means[counts > 0, :] / counts[counts > 0, None]
+
+                fs[i][:] = means[Z, :]
+
+        if len(args) == 1:
+            return fs[0]
+        else:
+            return tuple(fs)
 
     if len(args) == 1:
         # The gelsy driver raises in this case - we handle it separately
@@ -92,59 +110,3 @@ def proj(Z, *args, categories=None):
     return (
         *(fs[:, i:j].reshape(f.shape) for i, j, f in zip(csum[:-1], csum[1:], args)),
     )
-
-
-def oproj(Z, *args, categorical_Z=False):
-    """Project f onto the subspace orthogonal to Z.
-
-    Parameters
-    ----------
-    Z: np.ndarray of dimension (n, d_Z)
-        The Z matrix. If None, returns f.
-    *args: np.ndarrays of dimension (n, d_f) or (n,)
-        vector or matrices to project.
-    allow_categorical_Z: bool, default=True
-        If True, and Z.shape[1] == 1 and Z.dtype is int, then Z is assumed to be
-        categorical and the projection is done by averaging the values of f within each
-        category.
-
-    Returns
-    -------
-    np.ndarray of dimension (n, d_f) or (n,)
-        Projection of args onto the subspace spanned by Z. Same number of
-        outputs as args. Same dimension as args
-    """
-    if Z is None:
-        return (*args,)
-
-    if len(args) == 1:
-        return args[0] - proj(Z, args[0], categorical_Z=categorical_Z)
-
-    else:
-        return (
-            *(
-                x - x_proj
-                for x, x_proj in zip(args, proj(Z, *args, categorical_Z=categorical_Z))
-            ),
-        )
-
-
-def to_numpy(*args):
-    """Convert input args to a numpy array."""
-    out = []
-    for x in args:
-        if x is None:
-            out.append(None)
-        elif isinstance(x, np.ndarray):
-            out.append(x)
-        elif _PANDAS_INSTALLED and isinstance(x, (pd.DataFrame, pd.Series)):
-            out.append(x.to_numpy())
-        elif _POLARS_INSTALLED and isinstance(x, pl.DataFrame):
-            out.append(x.to_numpy())
-        else:
-            raise ValueError(f"Invalid type: {type(x)}")
-
-    if len(args) == 1:
-        return out[0]
-    else:
-        return (*out,)

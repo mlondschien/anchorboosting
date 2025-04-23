@@ -1,5 +1,27 @@
 import numpy as np
 
+from anchorboosting.utils import proj
+
+
+class ProjMixin:
+    def __init__(self, precompute_proj=False, n_categories=None):
+        self.n_categories = n_categories
+        self.precompute_proj = precompute_proj
+        self.pinvZ = None
+
+    def proj(self, Z, *args, copy=False):
+        if self.n_categories is not None:
+            return proj(Z, *args, n_categories=self.n_categories, copy=copy)
+        elif self.precompute_proj:
+            if self.pinvZ is None:
+                self.pinvZ = np.linalg.pinv(Z)
+            if len(args) == 1:
+                return np.dot(Z, self.pinvZ @ args[0])
+            else:
+                return (*(np.dot(Z, self.pinvZ @ f) for f in args),)
+        else:
+            return proj(Z, *args, n_caregories=None, copy=copy)
+
 
 class LGBMMixin:
     higher_is_better = False
@@ -115,7 +137,8 @@ class ClassificationMixin:
 
 
 class MultiClassificationMixin:
-    def __init__(self, n_classes):
+    def __init__(self, n_classes, **kwargs):
+        super().__init__(**kwargs)
         self.n_classes = n_classes
         self.factor = (n_classes - 1) / n_classes
 

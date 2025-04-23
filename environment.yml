@@ -1,4 +1,4 @@
-name: anchorboosting.
+name: anchorboosting
 channels:
   - conda-forge
   - nodefaults
@@ -6,6 +6,7 @@ dependencies:
   - python >=3.9
   - pytest
   - numpy >=1.19.0
+  - scipy
   - matplotlib
   - lightgbm >=4.0.0
   - pip
