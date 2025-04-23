@@ -13,7 +13,6 @@ try:
 except ImportError:
     _POLARS_INSTALLED = False
 
-
 class AnchorBooster:
     """
     Boost the anchor regression loss.
@@ -23,23 +22,24 @@ class AnchorBooster:
     gamma: float
         The gamma parameter for the anchor regression objective function. Must be non-
         negative. If 1, the objective is equivalent to a standard regression objective.
-    params: dict or None
-        The parameters for the LightGBM model. See LightGBM documentation for details.
     dataset_params: dict or None
         The parameters for the LightGBM dataset. See LightGBM documentation for details.
     num_boost_round: int
         The number of boosting iterations. Default is 100.
+    **kwargs: dict
+        Additional parameters for the LightGBM model. See LightGBM documentation for
+        details.
     """
 
     def __init__(
         self,
         gamma,
-        params=None,
         dataset_params=None,
         num_boost_round=100,
+        **kwargs,
     ):
         self.gamma = gamma
-        self.params = params or {}
+        self.params = kwargs
         self.dataset_params = dataset_params or {}
         self.num_boost_round = num_boost_round
         self.booster = None
@@ -77,6 +77,7 @@ class AnchorBooster:
             feature_name = None
 
         self.init_score_ = np.mean(y)
+
         dataset_params = {
             "data": X,
             "label": y,
@@ -134,8 +135,7 @@ class AnchorBooster:
             residuals_mult = residuals + mult * residuals_proj
 
             leaf_values = (
-                self.params.get("learning_rate", 0.1)
-                * scipy.linalg.lstsq(
+                self.params.get("learning_rate", 0.1) * scipy.linalg.lstsq(
                     M[:, :num_leaves], residuals_mult, cond=None, lapack_driver="gelsy"
                 )[0]
             )
