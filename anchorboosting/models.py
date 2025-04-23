@@ -134,10 +134,10 @@ class AnchorBooster:
             residuals_mult = residuals + mult * residuals_proj
 
             leaf_values = (
-                self.params.get("learning_rate", 0.1),
-                *scipy.linalg.lstsq(
+                self.params.get("learning_rate", 0.1)
+                * scipy.linalg.lstsq(
                     M[:, :num_leaves], residuals_mult, cond=None, lapack_driver="gelsy"
-                )[0],
+                )[0]
             )
 
             for ldx, val in enumerate(leaf_values):
