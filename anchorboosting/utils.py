@@ -4,7 +4,7 @@ import numpy as np
 import scipy
 
 
-def proj(Z, *args, n_categories=None, copy=False):
+def proj(Z, f, n_categories=None, copy=False):
     """
     Project f onto the subspace spanned by Z.
 
@@ -35,21 +35,17 @@ def proj(Z, *args, n_categories=None, copy=False):
         outputs as args. Same dimension as args
     """
     if Z is None:
-        return (*(np.zeros_like(f) for f in args),)
+        return np.zeros_like(f)
 
-    for f in args:
-        if len(f.shape) > 2:
-            raise ValueError(
-                f"*args should have shapes (n, d_f) or (n,). Got {f.shape}."
-            )
-        if f.shape[0] != Z.shape[0]:
-            raise ValueError(f"Shape mismatch: Z.shape={Z.shape}, f.shape={f.shape}.")
+    if len(f.shape) > 2:
+        raise ValueError(
+            f"*args should have shapes (n, d_f) or (n,). Got {f.shape}."
+        )
+    if f.shape[0] != Z.shape[0]:
+        raise ValueError(f"Shape mismatch: Z.shape={Z.shape}, f.shape={f.shape}.")
 
     if n_categories is not None:
-        if copy:
-            fs = [np.zeros_like(f) for f in args]
-        else:
-            fs = args
+        f = f.copy() if copy else f
 
         if len(Z.shape) != 1 or Z.dtype != int:
             raise ValueError(
@@ -57,56 +53,34 @@ def proj(Z, *args, n_categories=None, copy=False):
                 f"integers. Got shape {Z.shape} and dtype {Z.dtype}."
             )
 
-        for i, f in enumerate(args):
-            if len(f.shape) == 1:
-                means = np.zeros((n_categories,))
-                counts = np.zeros(n_categories)
+        if len(f.shape) == 1:
+            means = np.zeros((n_categories,))
+            counts = np.zeros(n_categories)
 
-                # np.add.at(a, indices, b) is equivalent to a[indices] += b
-                np.add.at(means, Z, f)
-                np.add.at(counts, Z, 1)
+            # np.add.at(a, indices, b) is equivalent to a[indices] += b
+            np.add.at(means, Z, f)
+            np.add.at(counts, Z, 1)
 
-                means[counts > 0] = means[counts > 0] / counts[counts > 0]
+            means[counts > 0] = means[counts > 0] / counts[counts > 0]
 
-                fs[i][:] = means[Z]
-            else:
-                means = np.zeros((n_categories, f.shape[1]))
-                counts = np.zeros(n_categories)
-
-                # np.add.at(a, indices, b) is equivalent to a[indices] += b
-                np.add.at(means, Z, f)
-                np.add.at(counts, Z, 1)
-
-                means[counts > 0, :] = means[counts > 0, :] / counts[counts > 0, None]
-
-                fs[i][:] = means[Z, :]
-
-        if len(args) == 1:
-            return fs[0]
+            f[:] = means[Z]
         else:
-            return tuple(fs)
+            means = np.zeros((n_categories, f.shape[1]))
+            counts = np.zeros(n_categories)
 
-    if len(args) == 1:
-        # The gelsy driver raises in this case - we handle it separately
-        if len(args[0].shape) == 2 and args[0].shape[1] == 0:
-            return np.zeros_like(args[0])
+            # np.add.at(a, indices, b) is equivalent to a[indices] += b
+            np.add.at(means, Z, f)
+            np.add.at(counts, Z, 1)
 
-        # return np.dot(Z, scipy.linalg.pinv(Z.T @ Z) @ Z.T @ args[0])
-        return np.dot(
-            Z, scipy.linalg.lstsq(Z, args[0], cond=None, lapack_driver="gelsy")[0]
-        )
+            means[counts > 0, :] = means[counts > 0, :] / counts[counts > 0, None]
 
-    csum = np.cumsum([f.shape[1] if len(f.shape) == 2 else 1 for f in args])
-    csum = [0] + csum.tolist()
+            f[:] = means[Z, :]
+        
+        return f
 
-    fs = np.hstack([f.reshape(Z.shape[0], -1) for f in args])
+    # The gelsy driver raises in this case - we handle it separately
+    if len(f.shape) == 2 and f.shape[1] == 0:
+        return np.zeros_like(f)
 
-    if fs.shape[1] == 0:
-        # The gelsy driver raises in this case - we handle it separately
-        return (*(np.zeros_like(f) for f in args),)
-
-    # fs = np.dot(Z, scipy.linalg.pinv(Z.T @ Z) @ Z.T @ fs)
-    fs = np.dot(Z, scipy.linalg.lstsq(Z, fs, cond=None, lapack_driver="gelsy")[0])
-    return (
-        *(fs[:, i:j].reshape(f.shape) for i, j, f in zip(csum[:-1], csum[1:], args)),
-    )
+    # return np.dot(Z, scipy.linalg.pinv(Z.T @ Z) @ Z.T @ args[0])
+    return np.dot(Z, scipy.linalg.lstsq(Z, f, cond=None, lapack_driver="gelsy")[0])
