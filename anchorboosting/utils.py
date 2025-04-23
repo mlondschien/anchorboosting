@@ -47,7 +47,7 @@ def proj(Z, f, n_categories=None, copy=False):
     if n_categories is not None:
         f = f.copy() if copy else f
 
-        if len(Z.shape) != 1 or Z.dtype != int:
+        if len(Z.shape) != 1 or not np.issubdtype(Z.dtype, np.integer):
             raise ValueError(
                 "If n_categories is not None, then Z should be a single column of "
                 f"integers. Got shape {Z.shape} and dtype {Z.dtype}."
