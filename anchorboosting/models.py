@@ -49,7 +49,7 @@ class AnchorBooster:
         self,
         X,
         y,
-        anchor=None,
+        Z=None,
         n_categories=None,
         categorical_feature=None,
     ):
@@ -62,7 +62,7 @@ class AnchorBooster:
             The input data.
         y : np.ndarray
             The outcome.
-        anchor : np.ndarray
+        Z : np.ndarray
             Matrix of floats or 1d array of integers 0, ..., n_categories - 1.
         n_categories : int
             If anchor is a 1d array of integers, this is the number of categories.
@@ -87,14 +87,14 @@ class AnchorBooster:
         }
 
         data = lgb.Dataset(**dataset_params)
-        data.anchor = anchor
+        data.anchor = Z
 
         self.booster = lgb.Booster(params=self.params, train_set=data)
         mult = np.sqrt(self.gamma) - 1
         M = np.empty((len(y), self.params.get("num_leaves", 31) + 1), dtype=np.float64)
         residuals = y - dataset_params["init_score"]
 
-        proj_Z = _get_proj(Z=anchor, n_categories=n_categories)
+        proj_Z = _get_proj(Z=Z, n_categories=n_categories)
         hess = np.ones(len(y), dtype=np.float64)
 
         for idx in range(self.num_boost_round):
