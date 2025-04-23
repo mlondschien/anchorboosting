@@ -63,7 +63,7 @@ class AnchorBooster:
         y : np.ndarray
             The outcome.
         Z : np.ndarray
-            Matrix of floats or 1d array of integers 0, ..., n_categories - 1.
+            Anchor. Matrix of floats or 1d array of integers 0, ..., n_categories - 1.
         n_categories : int
             If anchor is a 1d array of integers, this is the number of categories.
         categorical_feature : list of str or int
@@ -134,10 +134,10 @@ class AnchorBooster:
             residuals_mult = residuals + mult * residuals_proj
 
             leaf_values = (
-                self.params["learning_rate"]
-                * scipy.linalg.lstsq(
+                self.params.get("learning_rate", 0.1),
+                *scipy.linalg.lstsq(
                     M[:, :num_leaves], residuals_mult, cond=None, lapack_driver="gelsy"
-                )[0]
+                )[0],
             )
 
             for ldx, val in enumerate(leaf_values):
