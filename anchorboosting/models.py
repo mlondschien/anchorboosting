@@ -13,6 +13,7 @@ try:
 except ImportError:
     _POLARS_INSTALLED = False
 
+
 class AnchorBooster:
     """
     Boost the anchor regression loss.
@@ -130,12 +131,22 @@ class AnchorBooster:
             )
             num_leaves = np.max(leaves) + 1
 
+            # We wish to select the leaf values to minimize the anchor loss:
+            # loss = || y - f ||^2 + (gamma - 1) || proj(Z, y - f) ||^2
+            # Let W = Id + (sqrt(gamma) - 1) proj(Z, .). Then, loss = || W(y - f) ||^2.
+            # Let M be the one-hot encoding of the tree's leaf assignments. That is,
+            # M[i, j] = 1 if leaves[i] == j else 0. Then, the loss of any leaf values
+            # `leaf_values` is given by || W (y - M @ leaf_values) ||^2. The optimal
+            # leaf values can be computed using a least-squares regression on the
+            # transformed data W @ y ~ W @ M.
+            # If gamma = 1, then this is equivalent to the standard regression objective
             M[:, :num_leaves] = np.equal.outer(leaves, np.arange(num_leaves))
             M[:, :num_leaves] += mult * proj_Z(M[:, :num_leaves], copy=False)
             residuals_mult = residuals + mult * residuals_proj
 
             leaf_values = (
-                self.params.get("learning_rate", 0.1) * scipy.linalg.lstsq(
+                self.params.get("learning_rate", 0.1)
+                * scipy.linalg.lstsq(
                     M[:, :num_leaves], residuals_mult, cond=None, lapack_driver="gelsy"
                 )[0]
             )
