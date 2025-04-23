@@ -23,8 +23,10 @@ class AnchorBooster:
     gamma: float
         The gamma parameter for the anchor regression objective function. Must be non-
         negative. If 1, the objective is equivalent to a standard regression objective.
-    params: dict
+    params: dict or None
         The parameters for the LightGBM model. See LightGBM documentation for details.
+    dataset_params: dict or None
+        The parameters for the LightGBM dataset. See LightGBM documentation for details.
     num_boost_round: int
         The number of boosting iterations. Default is 100.
     """
@@ -32,13 +34,13 @@ class AnchorBooster:
     def __init__(
         self,
         gamma,
-        params,
-        dataset_params,
+        params=None,
+        dataset_params=None,
         num_boost_round=100,
     ):
         self.gamma = gamma
-        self.params = params
-        self.dataset_params = dataset_params
+        self.params = params or {}
+        self.dataset_params = dataset_params or {}
         self.num_boost_round = num_boost_round
         self.booster = None
         self.init_score_ = None
@@ -47,7 +49,6 @@ class AnchorBooster:
         self,
         X,
         y,
-        sample_weight=None,
         anchor=None,
         n_categories=None,
         categorical_feature=None,
@@ -61,11 +62,13 @@ class AnchorBooster:
             The input data.
         y : np.ndarray
             The outcome.
-        sample_weight : np.ndarray, optional
-            The sample weights.
         anchor : np.ndarray
-            Array of dataset indicators. Each unique value is assumed to correspond to a
-            single environment. The anchor then is a one-hot encoding of this.
+            Matrix of floats or 1d array of integers 0, ..., n_categories - 1.
+        n_categories : int
+            If anchor is a 1d array of integers, this is the number of categories.
+        categorical_feature : list of str or int
+            List of categorical feature names or indices. If None, all features are
+            assumed to be numerical.
         """
         if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
             feature_name = X.columns
@@ -77,10 +80,10 @@ class AnchorBooster:
         dataset_params = {
             "data": X,
             "label": y,
-            "weight": sample_weight,
             "categorical_feature": categorical_feature,
             "feature_name": feature_name,
             "init_score": np.ones(len(y)) * self.init_score_,
+            **self.dataset_params,
         }
 
         data = lgb.Dataset(**dataset_params)
@@ -91,7 +94,7 @@ class AnchorBooster:
         M = np.empty((len(y), self.params.get("num_leaves", 31) + 1), dtype=np.float64)
         residuals = y - dataset_params["init_score"]
 
-        proj_Z = self._get_proj(Z=anchor, n_categories=n_categories)
+        proj_Z = _get_proj(Z=anchor, n_categories=n_categories)
         hess = np.ones(len(y), dtype=np.float64)
 
         for idx in range(self.num_boost_round):
@@ -150,7 +153,7 @@ class AnchorBooster:
 
         Parameters
         ----------
-        X : polars.DataFrame or pyarrow.Table
+        X : numpy.ndarray, polars.DataFrame, or pyarrow.Table
             The input data.
         num_iteration : int
             Number of boosting iterations to use. If -1, all are used. Else, needs to be
@@ -165,16 +168,17 @@ class AnchorBooster:
         scores = self.booster.predict(X, num_iteration=num_iteration, raw_score=True)
         return scores + self.init_score_
 
-    def _get_proj(self, Z, n_categories=None):
-        if n_categories is not None:
-            return partial(proj, Z=Z, n_categories=n_categories)
-        else:
-            pinvZ = np.linalg.pinv(Z)
 
-            def proj_precomputed(*args, copy=False):
-                if len(args) == 1:
-                    return np.dot(Z, pinvZ @ args[0])
-                else:
-                    return (*(np.dot(Z, pinvZ @ f) for f in args),)
+def _get_proj(Z, n_categories=None):
+    if n_categories is not None:
+        return partial(proj, Z=Z, n_categories=n_categories)
+    else:
+        pinvZ = np.linalg.pinv(Z)
 
-            return proj_precomputed
+        def proj_precomputed(*args, copy=False):
+            if len(args) == 1:
+                return np.dot(Z, pinvZ @ args[0])
+            else:
+                return (*(np.dot(Z, pinvZ @ f) for f in args),)
+
+        return proj_precomputed
