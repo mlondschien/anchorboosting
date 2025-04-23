@@ -1,0 +1,25 @@
+import numpy as np
+import pytest
+from your_module import simulate, f1, f2  # Replace 'your_module' with the actual module name
+
+
+@pytest.mark.parametrize("f", [f1, f2])
+def test_simulate_shapes_and_values(f):
+    n = 50
+    x, y, a = simulate(f, n=n, shift=1, seed=42)
+
+    # Check shapes
+    assert x.shape == (n, 2), "x should have shape (n, 2)"
+    assert y.shape == (n,), "y should have shape (n,)"
+    assert a.shape == (n, 2), "a should have shape (n, 2)"
+
+    # Check values are finite
+    assert np.all(np.isfinite(x)), "x should have only finite values"
+    assert np.all(np.isfinite(y)), "y should have only finite values"
+    assert np.all(np.isfinite(a)), "a should have only finite values"
+
+    # Reproducibility test
+    x2, y2, a2 = simulate(f, n=n, shift=1, seed=42)
+    np.testing.assert_allclose(x, x2)
+    np.testing.assert_allclose(y, y2)
+    np.testing.assert_allclose(a, a2)
