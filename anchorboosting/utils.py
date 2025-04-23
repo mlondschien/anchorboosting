@@ -38,9 +38,7 @@ def proj(Z, f, n_categories=None, copy=False):
         return np.zeros_like(f)
 
     if len(f.shape) > 2:
-        raise ValueError(
-            f"*args should have shapes (n, d_f) or (n,). Got {f.shape}."
-        )
+        raise ValueError(f"*args should have shapes (n, d_f) or (n,). Got {f.shape}.")
     if f.shape[0] != Z.shape[0]:
         raise ValueError(f"Shape mismatch: Z.shape={Z.shape}, f.shape={f.shape}.")
 
@@ -75,7 +73,7 @@ def proj(Z, f, n_categories=None, copy=False):
             means[counts > 0, :] = means[counts > 0, :] / counts[counts > 0, None]
 
             f[:] = means[Z, :]
-        
+
         return f
 
     # The gelsy driver raises in this case - we handle it separately
