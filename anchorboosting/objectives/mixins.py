@@ -20,7 +20,7 @@ class ProjMixin:
             else:
                 return (*(np.dot(Z, self.pinvZ @ f) for f in args),)
         else:
-            return proj(Z, *args, n_caregories=None, copy=copy)
+            return proj(Z, *args, n_categories=None, copy=copy)
 
 
 class LGBMMixin:
