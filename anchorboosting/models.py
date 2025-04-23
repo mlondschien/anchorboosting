@@ -116,13 +116,14 @@ class AnchorBooster:
                     {"objective": "none"}
                 )._Booster__set_objective_to_none = True
 
-
             if idx < 1 / self.params.get("learning_rate", 0.1):
                 _ = self.booster._Booster__boost(-residuals, hess)
-                residuals -= self.booster.predict(X, start_iteration=idx, num_iteration=1, raw_score=True)
+                residuals -= self.booster.predict(
+                    X, start_iteration=idx, num_iteration=1, raw_score=True
+                )
                 continue
 
-            residuals_proj = proj_Z(f = residuals, copy=True)
+            residuals_proj = proj_Z(f=residuals, copy=True)
             grad = -residuals - (self.gamma - 1) * residuals_proj
             # is_finished is True if there we no splits satisfying the splitting
             # criteria. c.f. https://github.com/microsoft/LightGBM/pull/6890
@@ -147,7 +148,7 @@ class AnchorBooster:
             # transformed data W @ y ~ W @ M.
             # If gamma = 1, then this is equivalent to the standard regression objective
             M[:, :num_leaves] = np.equal.outer(leaves, np.arange(num_leaves))
-            M[:, :num_leaves] += mult * proj_Z(f = M[:, :num_leaves], copy=False)
+            M[:, :num_leaves] += mult * proj_Z(f=M[:, :num_leaves], copy=False)
             residuals_mult = residuals + mult * residuals_proj
 
             leaf_values = (
@@ -184,6 +185,7 @@ class AnchorBooster:
 
         scores = self.booster.predict(X, num_iteration=num_iteration, raw_score=True)
         return scores + self.init_score_
+
 
 def _get_proj(Z, n_categories=None):
     if n_categories is not None:
