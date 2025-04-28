@@ -1,10 +1,6 @@
-from functools import partial
-
 import lightgbm as lgb
 import numpy as np
 import scipy
-
-from line_profiler import profile
 
 try:
     import polars as pl
@@ -46,7 +42,6 @@ class AnchorBooster:
         self.booster = None
         self.init_score_ = None
 
-    @profile
     def fit(
         self,
         X,
@@ -117,7 +112,7 @@ class AnchorBooster:
                 )._Booster__set_objective_to_none = True
 
             residuals_proj = Q @ (Q.T @ residuals)
-            grad = - residuals - (self.gamma - 1) * residuals_proj
+            grad = -residuals - (self.gamma - 1) * residuals_proj
             # is_finished is True if there we no splits satisfying the splitting
             # criteria. c.f. https://github.com/microsoft/LightGBM/pull/6890
             is_finished = self.booster._Booster__boost(grad, hess)
@@ -126,7 +121,9 @@ class AnchorBooster:
                 print(f"Finished training after {idx} iterations.")
                 break
 
-            leaves = self.booster.predict(X, start_iteration=idx, num_iteration=1, pred_leaf=True)
+            leaves = self.booster.predict(
+                X, start_iteration=idx, num_iteration=1, pred_leaf=True
+            )
             num_leaves = np.max(leaves) + 1
 
             # Let M be the one-hot encoding of the tree's leaf assignments. That is,
@@ -139,7 +136,7 @@ class AnchorBooster:
             # with M^T M = diag(np.bincount(leaves)).
             M = scipy.sparse.csr_matrix(
                 (np.ones_like(leaves), (np.arange(len(leaves)), leaves)),
-                shape=(len(leaves), num_leaves)
+                shape=(len(leaves), num_leaves),
             )
             B = M.T.dot(Q)  # M^T @ Q of shape (num_leaves, num_anchors)
 
@@ -148,10 +145,10 @@ class AnchorBooster:
             A = np.diag(counts) + (self.gamma - 1) * B @ B.T
 
             # b = M^T (Id + (gamma - 1) P_Z) y
-            b = np.bincount(leaves, weights=grad, minlength=num_leaves) 
+            b = np.bincount(leaves, weights=grad, minlength=num_leaves)
             # b += (self.gamma - 1) * M.T.dot(residuals_proj)
-            
-            leaf_values = - np.linalg.solve(A, b) * self.params.get("learning_rate", 0.1)
+
+            leaf_values = -np.linalg.solve(A, b) * self.params.get("learning_rate", 0.1)
 
             for ldx, val in enumerate(leaf_values):
                 self.booster.set_leaf_output(idx, ldx, val)
