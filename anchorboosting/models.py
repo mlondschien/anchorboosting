@@ -4,7 +4,7 @@ import lightgbm as lgb
 import numpy as np
 import scipy
 
-from anchorboosting.utils import proj
+from line_profiler import profile
 
 try:
     import polars as pl
@@ -46,12 +46,12 @@ class AnchorBooster:
         self.booster = None
         self.init_score_ = None
 
+    @profile
     def fit(
         self,
         X,
         y,
         Z=None,
-        n_categories=None,
         categorical_feature=None,
     ):
         """
@@ -92,13 +92,13 @@ class AnchorBooster:
         data.anchor = Z
 
         self.booster = lgb.Booster(params=self.params, train_set=data)
-        mult = np.sqrt(self.gamma) - 1
         M = np.empty((len(y), self.params.get("num_leaves", 31) + 1), dtype=np.float64)
         residuals = y - dataset_params["init_score"]
 
-        proj_Z = _get_proj(Z=Z, n_categories=n_categories)
+        Q, _ = np.linalg.qr(Z, mode="reduced")  # P_Z f = Q @ (Q^T @ f)
         hess = np.ones(len(y), dtype=np.float64)
 
+        # rng = np.random.default_rng(self.params.get("random_state", 0))
         for idx in range(self.num_boost_round):
             # We wish to fit one additional tree. Intuitively, one would use
             # is_finished = self.booster.update(fobj=self.objective.objective)
@@ -116,15 +116,8 @@ class AnchorBooster:
                     {"objective": "none"}
                 )._Booster__set_objective_to_none = True
 
-            if idx < 1 / self.params.get("learning_rate", 0.1):
-                _ = self.booster._Booster__boost(-residuals, hess)
-                residuals -= self.booster.predict(
-                    X, start_iteration=idx, num_iteration=1, raw_score=True
-                )
-                continue
-
-            residuals_proj = proj_Z(f=residuals, copy=True)
-            grad = -residuals - (self.gamma - 1) * residuals_proj
+            residuals_proj = Q @ (Q.T @ residuals)
+            grad = - residuals - (self.gamma - 1) * residuals_proj
             # is_finished is True if there we no splits satisfying the splitting
             # criteria. c.f. https://github.com/microsoft/LightGBM/pull/6890
             is_finished = self.booster._Booster__boost(grad, hess)
@@ -133,35 +126,38 @@ class AnchorBooster:
                 print(f"Finished training after {idx} iterations.")
                 break
 
-            leaves = self.booster.predict(
-                X, start_iteration=idx, num_iteration=1, pred_leaf=True
-            )
+            leaves = self.booster.predict(X, start_iteration=idx, num_iteration=1, pred_leaf=True)
             num_leaves = np.max(leaves) + 1
 
-            # We wish to select the leaf values to minimize the anchor loss:
-            # loss = || y - f ||^2 + (gamma - 1) || proj(Z, y - f) ||^2
-            # Let W = Id + (sqrt(gamma) - 1) proj(Z, .). Then, loss = || W(y - f) ||^2.
             # Let M be the one-hot encoding of the tree's leaf assignments. That is,
-            # M[i, j] = 1 if leaves[i] == j else 0. Then, the loss of any leaf values
-            # `leaf_values` is given by || W (y - M @ leaf_values) ||^2. The optimal
-            # leaf values can be computed using a least-squares regression on the
-            # transformed data W @ y ~ W @ M.
-            # If gamma = 1, then this is equivalent to the standard regression objective
-            M[:, :num_leaves] = np.equal.outer(leaves, np.arange(num_leaves))
-            M[:, :num_leaves] += mult * proj_Z(f=M[:, :num_leaves], copy=False)
-            residuals_mult = residuals + mult * residuals_proj
-
-            leaf_values = (
-                self.params.get("learning_rate", 0.1)
-                * scipy.linalg.lstsq(
-                    M[:, :num_leaves], residuals_mult, cond=None, lapack_driver="gelsy"
-                )[0]
+            # M[i, j] = 1 if leaves[i] == j else 0. We wish to select the leaf values
+            # beta to minimize the anchor loss:
+            # loss = || y - M beta ||^2 + (gamma - 1) || P_Z (y - M beta) ||^2
+            #      = || (Id + (gamma - 1) P_Z) (y - M beta) ||^2
+            # The optimal beta is given by
+            # beta = (M^T (Id + (gamma - 1) P_Z) M)^{-1} M^T (Id + (gamma - 1) P_Z) y
+            # with M^T M = diag(np.bincount(leaves)).
+            M = scipy.sparse.csr_matrix(
+                (np.ones_like(leaves), (np.arange(len(leaves)), leaves)),
+                shape=(len(leaves), num_leaves)
             )
+            B = M.T.dot(Q)  # M^T @ Q of shape (num_leaves, num_anchors)
+
+            # A = M^T (Id + (gamma - 1) P_Z) M, where M^T M = diag(np.bincount(leaves))
+            counts = np.bincount(leaves, minlength=num_leaves) * 1.0
+            A = np.diag(counts) + (self.gamma - 1) * B @ B.T
+
+            # b = M^T (Id + (gamma - 1) P_Z) y
+            b = np.bincount(leaves, weights=grad, minlength=num_leaves) 
+            # b += (self.gamma - 1) * M.T.dot(residuals_proj)
+            
+            leaf_values = - np.linalg.solve(A, b) * self.params.get("learning_rate", 0.1)
 
             for ldx, val in enumerate(leaf_values):
                 self.booster.set_leaf_output(idx, ldx, val)
-                # Ensure residuals == y - self.init_score_ - self.booster.predict(X)
-                residuals[leaves == ldx] -= val
+
+            # Ensure residuals == y - self.init_score_ - self.booster.predict(X)
+            residuals -= leaf_values[leaves]
 
         return self
 
@@ -187,13 +183,13 @@ class AnchorBooster:
         return scores + self.init_score_
 
 
-def _get_proj(Z, n_categories=None):
-    if n_categories is not None:
-        return partial(proj, Z=Z, n_categories=n_categories)
-    else:
-        pinvZ = np.linalg.pinv(Z)
+# def _get_proj(Z, n_categories=None):
+#     if n_categories is not None:
+#         return partial(proj, Z=Z, n_categories=n_categories)
+#     else:
+#         Q, _ = np.linalg.qr(Z, mode="reduced")
 
-        def proj_precomputed(f, copy=False):
-            return np.dot(Z, pinvZ @ f)
+#         def proj_precomputed(f, copy=False):
+#             return Q @ (Q.T @ f)
 
-        return proj_precomputed
+#         return proj_precomputed
