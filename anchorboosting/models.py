@@ -23,6 +23,9 @@ class AnchorBooster:
         The parameters for the LightGBM dataset. See LightGBM documentation for details.
     num_boost_round: int
         The number of boosting iterations. Default is 100.
+    honest_split_ratio: float, optional, default=0.5
+        Ratio of training data used to determine tree splits. The rest is used to
+        determine leaf values.
     **kwargs: dict
         Additional parameters for the LightGBM model. See LightGBM documentation for
         details.
@@ -33,6 +36,7 @@ class AnchorBooster:
         gamma,
         dataset_params=None,
         num_boost_round=100,
+        honest_split_ratio=0.5,
         **kwargs,
     ):
         self.gamma = gamma
@@ -41,6 +45,7 @@ class AnchorBooster:
         self.num_boost_round = num_boost_round
         self.booster = None
         self.init_score_ = None
+        self.honest_split_ratio = honest_split_ratio
 
     def fit(
         self,
@@ -70,6 +75,7 @@ class AnchorBooster:
         else:
             feature_name = None
 
+        dtype = np.result_type(Z, y)
         self.init_score_ = np.mean(y)
 
         dataset_params = {
@@ -77,22 +83,26 @@ class AnchorBooster:
             "label": y,
             "categorical_feature": categorical_feature,
             "feature_name": feature_name,
-            "init_score": np.ones(len(y)) * self.init_score_,
+            "init_score": np.ones(len(y), dtype=dtype) * self.init_score_,
             **self.dataset_params,
         }
 
         data = lgb.Dataset(**dataset_params)
-        data.anchor = Z
 
         self.booster = lgb.Booster(params=self.params, train_set=data)
-        M = np.empty((len(y), self.params.get("num_leaves", 31) + 1), dtype=np.float64)
         residuals = y - dataset_params["init_score"]
 
         Q, _ = np.linalg.qr(Z, mode="reduced")  # P_Z f = Q @ (Q^T @ f)
-        hess = np.ones(len(y), dtype=np.float64)
 
-        # rng = np.random.default_rng(self.params.get("random_state", 0))
+        rng = np.random.default_rng(self.params.get("random_state", 0))
+        mask = np.empty_like(residuals, dtype=np.bool_)
+        mask[: int(len(residuals) * self.honest_split_ratio)] = True
+        mask[int(len(residuals) * self.honest_split_ratio) :] = False
+
+        grad = np.empty(len(y), dtype=dtype)
+
         for idx in range(self.num_boost_round):
+            rng.shuffle(mask)
             # We wish to fit one additional tree. Intuitively, one would use
             # is_finished = self.booster.update(fobj=self.objective.objective)
             # for this. This makes a call to self.__inner_predict(0) to get the current
@@ -109,11 +119,14 @@ class AnchorBooster:
                     {"objective": "none"}
                 )._Booster__set_objective_to_none = True
 
-            residuals_proj = Q @ (Q.T @ residuals)
-            grad = -residuals - (self.gamma - 1) * residuals_proj
+            residuals_masked = residuals[mask]
+            residuals_masked_proj = Q[mask, :] @ (Q[mask, :].T @ residuals_masked)
+            grad[mask] = -residuals_masked - (self.gamma - 1) * residuals_masked_proj
+            grad[~mask] = 0.0
+
             # is_finished is True if there we no splits satisfying the splitting
             # criteria. c.f. https://github.com/microsoft/LightGBM/pull/6890
-            is_finished = self.booster._Booster__boost(grad, hess)
+            is_finished = self.booster._Booster__boost(grad, mask.astype(dtype))
 
             if is_finished:
                 print(f"Finished training after {idx} iterations.")
@@ -132,19 +145,27 @@ class AnchorBooster:
             # The optimal beta is given by
             # beta = (M^T (Id + (gamma - 1) P_Z) M)^{-1} M^T (Id + (gamma - 1) P_Z) y
             # with M^T M = diag(np.bincount(leaves)).
+            leaves_masked = leaves[~mask]
             M = scipy.sparse.csr_matrix(
-                (np.ones_like(leaves), (np.arange(len(leaves)), leaves)),
-                shape=(len(leaves), num_leaves),
+                (
+                    np.ones_like(leaves_masked),
+                    (np.arange(len(leaves_masked)), leaves_masked),
+                ),
+                shape=(len(leaves_masked), num_leaves),
+                dtype=dtype,
             )
-            B = M.T.dot(Q)  # M^T @ Q of shape (num_leaves, num_anchors)
-
+            B = M.T.dot(Q[~mask, :])  # M^T @ Q of shape (num_leaves, num_anchors)
             # A = M^T (Id + (gamma - 1) P_Z) M, where M^T M = diag(np.bincount(leaves))
-            counts = np.bincount(leaves, minlength=num_leaves) * 1.0
+            counts = np.bincount(leaves_masked, minlength=num_leaves)
+            # There might be some leaves without estimation samples. Set a 1 on the
+            # diagonal to ensure pos. def. of A. The resulting leaf value will be 0.
+            counts[counts == 0] = 1
             A = np.diag(counts) + (self.gamma - 1) * B @ B.T
-
             # b = M^T (Id + (gamma - 1) P_Z) y
-            b = np.bincount(leaves, weights=grad, minlength=num_leaves)
-            # b += (self.gamma - 1) * M.T.dot(residuals_proj)
+            residuals_masked = residuals[~mask]
+            residuals_masked_proj = Q[~mask, :] @ (Q[~mask, :].T @ residuals_masked)
+            weights = -residuals_masked - (self.gamma - 1) * residuals_masked_proj
+            b = np.bincount(leaves_masked, weights=weights, minlength=num_leaves)
 
             leaf_values = -np.linalg.solve(A, b) * self.params.get("learning_rate", 0.1)
 
