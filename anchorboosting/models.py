@@ -178,15 +178,3 @@ class AnchorBooster:
 
         scores = self.booster.predict(X, num_iteration=num_iteration, raw_score=True)
         return scores + self.init_score_
-
-
-# def _get_proj(Z, n_categories=None):
-#     if n_categories is not None:
-#         return partial(proj, Z=Z, n_categories=n_categories)
-#     else:
-#         Q, _ = np.linalg.qr(Z, mode="reduced")
-
-#         def proj_precomputed(f, copy=False):
-#             return Q @ (Q.T @ f)
-
-#         return proj_precomputed
