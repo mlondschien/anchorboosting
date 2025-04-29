@@ -123,7 +123,7 @@ class AnchorBooster:
 
             leaves = self.booster.predict(
                 X, start_iteration=idx, num_iteration=1, pred_leaf=True
-            )
+            ).flatten()
             num_leaves = np.max(leaves) + 1
 
             # Let M be the one-hot encoding of the tree's leaf assignments. That is,

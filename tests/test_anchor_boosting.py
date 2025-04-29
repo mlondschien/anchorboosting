@@ -21,7 +21,7 @@ def test_anchor_boosting(gamma):
 
     leaves = model.booster.predict(
         x, pred_leaf=True, start_iteration=9, num_iteration=1
-    )
+    ).flatten()
     M = np.equal.outer(leaves, np.arange(num_leaves)).astype(float)
     M += (np.sqrt(gamma) - 1) * a @ np.linalg.pinv(a) @ M
 
