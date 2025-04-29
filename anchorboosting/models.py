@@ -9,6 +9,7 @@ try:
 except ImportError:
     _POLARS_INSTALLED = False
 
+
 class AnchorBooster:
     """
     Boost the anchor regression loss.
@@ -74,8 +75,7 @@ class AnchorBooster:
         else:
             feature_name = None
 
-        dtype = np.resolve_dtype(Z, y)
-
+        dtype = np.result_type(Z, y)
         self.init_score_ = np.mean(y)
 
         dataset_params = {
@@ -97,7 +97,7 @@ class AnchorBooster:
         rng = np.random.default_rng(self.params.get("random_state", 0))
         mask = np.empty_like(residuals, dtype=np.bool_)
         mask[: int(len(residuals) * self.honest_split_ratio)] = True
-        mask[int(len(residuals) * self.honest_split_ratio) : ] = False
+        mask[int(len(residuals) * self.honest_split_ratio) :] = False
 
         grad = np.empty(len(y), dtype=dtype)
 
