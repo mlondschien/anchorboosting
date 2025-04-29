@@ -1,12 +1,11 @@
+import numpy as np
+import pytest
 
 from anchorboosting import AnchorBooster
-from anchorboosting.simulate import simulate, f1
-import pytest
-import numpy as np
+from anchorboosting.simulate import f1, simulate
 
-@pytest.mark.parametrize(
-    "gamma", [1.0, 2.0]
-)
+
+@pytest.mark.parametrize("gamma", [1.0, 2.0])
 def test_anchor_boosting(gamma):
     learning_rate = 0.1
     num_leaves = 3
