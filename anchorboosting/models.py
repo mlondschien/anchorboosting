@@ -9,7 +9,6 @@ try:
 except ImportError:
     _POLARS_INSTALLED = False
 
-
 class AnchorBooster:
     """
     Boost the anchor regression loss.
@@ -75,6 +74,8 @@ class AnchorBooster:
         else:
             feature_name = None
 
+        dtype = np.resolve_dtype(Z, y)
+
         self.init_score_ = np.mean(y)
 
         dataset_params = {
@@ -82,12 +83,11 @@ class AnchorBooster:
             "label": y,
             "categorical_feature": categorical_feature,
             "feature_name": feature_name,
-            "init_score": np.ones(len(y)) * self.init_score_,
+            "init_score": np.ones(len(y), dtype=dtype) * self.init_score_,
             **self.dataset_params,
         }
 
         data = lgb.Dataset(**dataset_params)
-        data.anchor = Z
 
         self.booster = lgb.Booster(params=self.params, train_set=data)
         residuals = y - dataset_params["init_score"]
@@ -99,7 +99,10 @@ class AnchorBooster:
         mask[: int(len(residuals) * self.honest_split_ratio)] = True
         mask[int(len(residuals) * self.honest_split_ratio) : ] = False
 
+        grad = np.empty(len(y), dtype=dtype)
+
         for idx in range(self.num_boost_round):
+            rng.shuffle(mask)
             # We wish to fit one additional tree. Intuitively, one would use
             # is_finished = self.booster.update(fobj=self.objective.objective)
             # for this. This makes a call to self.__inner_predict(0) to get the current
@@ -118,17 +121,12 @@ class AnchorBooster:
 
             residuals_masked = residuals[mask]
             residuals_masked_proj = Q[mask, :] @ (Q[mask, :].T @ residuals_masked)
-            grad = np.empty_like(residuals)
             grad[mask] = -residuals_masked - (self.gamma - 1) * residuals_masked_proj
             grad[~mask] = 0.0
 
             # is_finished is True if there we no splits satisfying the splitting
             # criteria. c.f. https://github.com/microsoft/LightGBM/pull/6890
-            rng.shuffle(mask)
-            grad_masked = np.where(mask, grad, 0.0)
-            is_finished = self.booster._Booster__boost(
-                grad_masked, mask.astype(np.float32)
-            )
+            is_finished = self.booster._Booster__boost(grad, mask.astype(dtype))
 
             if is_finished:
                 print(f"Finished training after {idx} iterations.")
@@ -154,18 +152,17 @@ class AnchorBooster:
                     (np.arange(len(leaves_masked)), leaves_masked),
                 ),
                 shape=(len(leaves_masked), num_leaves),
+                dtype=dtype,
             )
             B = M.T.dot(Q[~mask, :])  # M^T @ Q of shape (num_leaves, num_anchors)
             # A = M^T (Id + (gamma - 1) P_Z) M, where M^T M = diag(np.bincount(leaves))
-            counts = np.bincount(leaves_masked, minlength=num_leaves) * 1.0
+            counts = np.bincount(leaves_masked, minlength=num_leaves) + 0.1
             A = np.diag(counts) + (self.gamma - 1) * B @ B.T
-
             # b = M^T (Id + (gamma - 1) P_Z) y
             residuals_masked = residuals[~mask]
             residuals_masked_proj = Q[~mask, :] @ (Q[~mask, :].T @ residuals_masked)
-            grad = -residuals_masked - (self.gamma - 1) * residuals_masked_proj
-            b = np.bincount(leaves_masked, weights=grad, minlength=num_leaves)
-            # b += (self.gamma - 1) * M.T.dot(residuals_proj)
+            weights = -residuals_masked - (self.gamma - 1) * residuals_masked_proj
+            b = np.bincount(leaves_masked, weights=weights, minlength=num_leaves)
 
             leaf_values = -np.linalg.solve(A, b) * self.params.get("learning_rate", 0.1)
 
