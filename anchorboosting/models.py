@@ -59,9 +59,7 @@ class AnchorBooster:
         y : np.ndarray
             The outcome.
         Z : np.ndarray
-            Anchor. Matrix of floats or 1d array of integers 0, ..., n_categories - 1.
-        n_categories : int
-            If anchor is a 1d array of integers, this is the number of categories.
+            Anchors.
         categorical_feature : list of str or int
             List of categorical feature names or indices. If None, all features are
             assumed to be numerical.
