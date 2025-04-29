@@ -156,7 +156,10 @@ class AnchorBooster:
             )
             B = M.T.dot(Q[~mask, :])  # M^T @ Q of shape (num_leaves, num_anchors)
             # A = M^T (Id + (gamma - 1) P_Z) M, where M^T M = diag(np.bincount(leaves))
-            counts = np.bincount(leaves_masked, minlength=num_leaves) + 0.1
+            counts = np.bincount(leaves_masked, minlength=num_leaves)
+            # There might be some leaves without estimation samples. Set a 1 on the
+            # diagonal to ensure pos. def. of A. The resulting leaf value will be 0.
+            counts[counts == 0] = 1
             A = np.diag(counts) + (self.gamma - 1) * B @ B.T
             # b = M^T (Id + (gamma - 1) P_Z) y
             residuals_masked = residuals[~mask]
