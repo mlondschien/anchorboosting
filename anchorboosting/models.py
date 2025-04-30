@@ -113,7 +113,11 @@ class AnchorBooster:
                 grad = -residuals - (self.gamma - 1) * residuals_proj
             else:
                 grad = -residuals - 2 * (self.gamma - 1) * residuals_proj * px1mp
-
+                # p (1 - p) is the hessian is gamma = 1. This is used only for the
+                # `min_hessian_in_leaf` parameter to avoid numerical instabilities.
+                # If the booster creates a leaf with very small sum( p * (1 - p) ),
+                # the hessian H below will be close to singular.
+                hess = px1mp
             # We wish to fit one additional tree. Intuitively, one would use
             # is_finished = self.booster.update(fobj=self.objective.objective)
             # for this. This makes a call to self.__inner_predict(0) to get the current
@@ -224,7 +228,8 @@ class AnchorBooster:
 
             # Compute the 2nd order update
             leaf_values = -np.linalg.solve(H, g) * self.params.get("learning_rate", 0.1)
-
+            if max(np.abs(leaf_values)) > 1e2:
+                breakpoint()
             for ldx, val in enumerate(leaf_values):
                 self.booster.set_leaf_output(idx, ldx, val)
 
