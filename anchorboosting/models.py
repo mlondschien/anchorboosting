@@ -107,7 +107,7 @@ class AnchorBooster:
             # For classification, predictions are p = 1 / (1 + exp(-f) and the gradient
             # grad = (y - p) - 2 * (gamma - 1) P_Z (y - p) * p * (1 - p)
             else:
-                p = 1 / (1 + np.exp(-f))
+                p = scipy.special.expit(f)
                 px1mp = p * (1 - p)
                 residuals = y - p
 
@@ -262,6 +262,6 @@ class AnchorBooster:
         scores = self.booster.predict(X, num_iteration=num_iteration, raw_score=True)
 
         if self.objective in ["classification", "binary"] and not raw_score:
-            return 1 / (1 + np.exp(-scores - self.init_score_))
+            return scipy.special.expit(scores + self.init_score_)
         else:
             return scores + self.init_score_
