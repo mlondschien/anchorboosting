@@ -80,6 +80,9 @@ class AnchorBooster:
             self.init_score_ = np.mean(y)
         else:
             self.init_score_ = np.log(np.mean(y) / (1 - np.mean(y)))
+            
+        if self.objective != "regression" and not np.isin(y, [0, 1]).all():
+            raise ValueError("For binary classification, y values must be in {0, 1}.")
 
         y = y.flatten()
 
@@ -176,8 +179,7 @@ class AnchorBooster:
                 g = np.bincount(leaves, weights=grad, minlength=num_leaves)
 
                 # M^T M = diag(np.bincount(leaves))
-                counts = np.bincount(leaves, minlength=num_leaves)
-
+                counts = np.bincount(leaves, minlength=num_leaves) + self.params.get("lambda_l2", 0)
                 # M^T P_Z M = (M^T Q) @ (M^T Q)^T
                 # One could also compute this using bincount, but it appears this
                 # version using a sparse matrix is faster.
@@ -209,14 +211,18 @@ class AnchorBooster:
             # H = M^T diag[p * (1 - p) *
             #                        {1 - 2 * (gamma - 1) * (1 - 2 * p) P_Z (y - p)}] M
             #   + 2 * (gamma - 1) M^T diag(p * (1 - p)) P_Z diag(p * (1 - p)) M
+            #
             else:
+                # Note that 
                 # M^T grad = bincount(leaves, grad)
+                # grad = - (y - p) - 2 * (gamma - 1) P_Z (y - p) * p * (1 - p)
+                
                 g = np.bincount(leaves, weights=grad, minlength=num_leaves)
 
                 weights = px1mp * (
                     1 - 2 * (self.gamma - 1) * (1 - 2 * p) * residuals_proj
-                )
-                counts = np.bincount(leaves, weights=weights, minlength=num_leaves)
+                ) 
+                counts = np.bincount(leaves, weights=weights, minlength=num_leaves) + self.params.get("lambda_l2", 0)
 
                 # We directly compute M <- diag(p * (1 - p)) M
                 M = scipy.sparse.csr_matrix(
