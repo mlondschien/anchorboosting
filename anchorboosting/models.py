@@ -70,6 +70,11 @@ class AnchorBooster:
         """
         if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
             feature_name = X.columns
+            categorical_feature = (
+                [X.columns.index(col) for col in categorical_feature]
+                if categorical_feature
+                else None
+            )
             X = X.to_arrow()
         else:
             feature_name = None
@@ -249,7 +254,7 @@ class AnchorBooster:
             raise ValueError("AnchorBoost has not yet been fitted.")
 
         if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
-            X = X.to_arrow()
+            X = X.numpy()
 
         scores = self.booster.predict(X, num_iteration=num_iteration, raw_score=True)
 
