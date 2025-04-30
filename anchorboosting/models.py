@@ -23,9 +23,8 @@ class AnchorBooster:
         The parameters for the LightGBM dataset. See LightGBM documentation for details.
     num_boost_round: int
         The number of boosting iterations. Default is 100.
-    honest_split_ratio: float, optional, default=0.5
-        Ratio of training data used to determine tree splits. The rest is used to
-        determine leaf values.
+    objective: str, optional, default="regression"
+        The objective function to use. Can be "regression" or "binary".
     **kwargs: dict
         Additional parameters for the LightGBM model. See LightGBM documentation for
         details.
@@ -96,7 +95,6 @@ class AnchorBooster:
 
         Q, _ = np.linalg.qr(Z, mode="reduced")  # P_Z f = Q @ (Q^T @ f)
         hess = np.ones(len(y), dtype=dtype)
-
         for idx in range(self.num_boost_round):
             # For regression, the gradient is grad = (y - f) + (gamma - 1) P_Z (y - f)
             if self.objective == "regression":
