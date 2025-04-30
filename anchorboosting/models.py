@@ -76,7 +76,11 @@ class AnchorBooster:
 
         dtype = np.result_type(Z, y)
 
-        self.init_score_ = np.mean(y)
+        if self.objective == "regression":
+            self.init_score_ = np.mean(y)
+        else:
+            self.init_score_ = np.log(np.mean(y) / (1 - np.mean(y)))
+
         y = y.flatten()
 
         dataset_params = {

@@ -1,3 +1,4 @@
+import lightgbm as lgb
 import numpy as np
 import pytest
 import scipy
@@ -79,7 +80,6 @@ def test_anchor_boosting_second_order(gamma, objective):
 @pytest.mark.parametrize("gamma", [1, 10])
 @pytest.mark.parametrize("objective", ["binary", "regression"])
 def test_anchor_boosting_decreases_loss(gamma, objective):
-    # learning_rate = 0.1
     num_leaves = 5
     n = 1000
 
@@ -122,44 +122,44 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
         loss_value = new_loss_value
 
 
-# @pytest.mark.parametrize("gamma", [1.0, 2.0, 100])
-# def test_anchor_boosting(gamma):
-#     learning_rate = 0.1
-#     num_leaves = 3
-#     n = 1000
+@pytest.mark.parametrize("objective", ["regression", "binary"])
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        {},
+        {"max_depth": -1},
+        {"num_leaves": 63},
+        {"min_split_gain": 0.002},
+        {"lambda_l2": 0.1},
+    ],
+)
+def test_compare_anchor_boosting_to_lgbm(objective, parameters):
+    X, y, a = simulate(f1, shift=0, seed=0)
 
-#     rng = np.random.default_rng(0)
-#     mask = np.ones(n, dtype=bool)
-#     mask[500:] = False
-#     for _ in range(10):
-#         rng.shuffle(mask)
+    if objective == "binary":
+        y = (y > 0).astype(int)
+    else:
+        y = y - y.mean()
 
-#     x, y, a = simulate(f1, n=n, shift=0, seed=0)
+    lgbm_model = lgb.train(
+        params={
+            "learning_rate": 0.1,
+            "objective": objective,
+            **parameters,
+        },
+        train_set=lgb.Dataset(X, y),
+        num_boost_round=10,
+    )
 
-#     model = AnchorBooster(gamma=gamma, num_boost_round=10, num_leaves=num_leaves)
-#     model.fit(x, y, Z=a)
+    anchor_booster = AnchorBooster(
+        gamma=1,
+        num_boost_round=10,
+        objective=objective,
+        learning_rate=0.1,
+        **parameters,
+    ).fit(X, y, Z=a)
 
-#     x, y = x[~mask, :], y[~mask]
-#     residuals = y - model.predict(x, num_iteration=9)
+    lgbm_pred = lgbm_model.predict(X)
+    anchor_booster_pred = anchor_booster.predict(X)
 
-#     leaves = model.booster.predict(
-#         x, pred_leaf=True, start_iteration=9, num_iteration=1
-#     ).flatten()
-
-#     # In Anchor Regression, we optimize || (Id + (gamma - 1) P_Z) (y - M beta) ||^2
-#     # In honest splits, we want to use y[mask] only to estimate split parameters, not
-#     # the leaf values. However, we still use all of the anchor `a` to estimate its
-#     # covariance `a.T @ a`.
-#     M = np.equal.outer(leaves, np.arange(num_leaves)).astype(float)
-#     MTM = M.T @ M + (gamma - 1) * M.T @ a[~mask, :] @ np.linalg.solve(
-#         a.T @ a, a[~mask, :].T @ M
-#     )
-#     MTy = M.T @ residuals + (gamma - 1) * M.T @ a[~mask, :] @ np.linalg.solve(
-#         a.T @ a, a[~mask, :].T @ residuals
-#     )
-
-#     expected_leaf_values = np.linalg.solve(MTM, MTy) * learning_rate
-#     for i in range(num_leaves):
-#         assert np.allclose(
-#             model.booster.get_leaf_output(9, i),
-#             expected_leaf_values[i],
+    np.testing.assert_allclose(lgbm_pred, anchor_booster_pred, rtol=1e-5)
