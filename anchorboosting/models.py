@@ -228,8 +228,7 @@ class AnchorBooster:
 
             # Compute the 2nd order update
             leaf_values = -np.linalg.solve(H, g) * self.params.get("learning_rate", 0.1)
-            if max(np.abs(leaf_values)) > 1e2:
-                breakpoint()
+
             for ldx, val in enumerate(leaf_values):
                 self.booster.set_leaf_output(idx, ldx, val)
 
