@@ -107,21 +107,6 @@ class AnchorBooster:
 
         for idx in range(self.num_boost_round):
             rng.shuffle(mask)
-            # We wish to fit one additional tree. Intuitively, one would use
-            # is_finished = self.booster.update(fobj=self.objective.objective)
-            # for this. This makes a call to self.__inner_predict(0) to get the current
-            # predictions for all existing trees. See:
-            # https://github.com/microsoft/LightGBM/blob/18c11f861118aa889b9d4579c2888d\
-            # 5c908fd250/python-package/lightgbm/basic.py#L4165
-            # To avoid passing data through all trees each time, this uses a cache.
-            # However, this cache is based on the "original" tree values, not the one
-            # we set below. We thus use "our own" predictions and skip __inner_predict.
-            # No idea what the set_objective_to_none does, but lgbm raises if we don't.
-            self.booster._Booster__inner_predict_buffer = None
-            if not self.booster._Booster__set_objective_to_none:
-                self.booster.reset_parameter(
-                    {"objective": "none"}
-                )._Booster__set_objective_to_none = True
 
             # For regression, the gradient is grad = (y - f) + (gamma - 1) P_Z (y - f)
             if self.objective == "regression":
@@ -147,6 +132,22 @@ class AnchorBooster:
                     + 2 * (self.gamma - 1) * residuals_masked_proj * px1mp[mask]
                 )
 
+            # We wish to fit one additional tree. Intuitively, one would use
+            # is_finished = self.booster.update(fobj=self.objective.objective)
+            # for this. This makes a call to self.__inner_predict(0) to get the current
+            # predictions for all existing trees. See:
+            # https://github.com/microsoft/LightGBM/blob/18c11f861118aa889b9d4579c2888d\
+            # 5c908fd250/python-package/lightgbm/basic.py#L4165
+            # To avoid passing data through all trees each time, this uses a cache.
+            # However, this cache is based on the "original" tree values, not the one
+            # we set below. We thus use "our own" predictions and skip __inner_predict.
+            # No idea what the set_objective_to_none does, but lgbm raises if we don't.
+            self.booster._Booster__inner_predict_buffer = None
+            if not self.booster._Booster__set_objective_to_none:
+                self.booster.reset_parameter(
+                    {"objective": "none"}
+                )._Booster__set_objective_to_none = True
+
             # is_finished is True if there we no splits satisfying the splitting
             # criteria. c.f. https://github.com/microsoft/LightGBM/pull/6890
             is_finished = self.booster._Booster__boost(grad, mask.astype(dtype))
@@ -170,7 +171,7 @@ class AnchorBooster:
             # The anchor regression objective is
             # L = || y - f ||^2 + (gamma - 1) || P_Z (y - f) ||^2
             # The gradient of the anchor regression objective w.r.t. f is
-            # g = - (y - f) - (gamma - 1) P_Z (y - f)
+            # g = - (y - f) - (gamma - 1) P_Z (y - f) = - (Id + (gamma - 1)) P_Z (y - f)
             # The hessian of the anchor regression objective w.r.t. f is
             # H = Id + (gamma - 1) P_Z
             # The gradient of the anchor regression objective w.r.t. the leaf values is
@@ -213,7 +214,7 @@ class AnchorBooster:
                 H = np.diag(counts) + (self.gamma - 1) * B @ B.T
 
             # Classification:
-            # The anchor classification objective is
+            # The anchor classification objective (loss) is
             # L = - sum_i (y_i log(p_i) + (1 - y_i) log(1 - p_i))
             #                                     + (gamma - 1) || P_Z (y - p) ||^2
             # The gradient of the anchor classification objective w.r.t. f is
@@ -260,7 +261,7 @@ class AnchorBooster:
                     dtype=dtype,
                 )
                 B = M.T.dot(Q_masked)  # M^T @ Q of shape (num_leaves, num_anchors)
-                H = np.diag(counts) + (self.gamma - 1) * B @ B.T
+                H = np.diag(counts) + 2 * (self.gamma - 1) * B @ B.T
 
             # Compute the 2nd order update
             leaf_values = -np.linalg.solve(H, g) * self.params.get("learning_rate", 0.1)
@@ -292,4 +293,8 @@ class AnchorBooster:
             X = X.to_arrow()
 
         scores = self.booster.predict(X, num_iteration=num_iteration, raw_score=True)
-        return scores + self.init_score_
+
+        if self.objective in ["classification", "binary"]:
+            return 1 / (1 + np.exp(-scores - self.init_score_))
+        else:
+            return scores + self.init_score_
