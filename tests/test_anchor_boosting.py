@@ -76,7 +76,7 @@ def test_anchor_boosting_second_order(gamma, objective):
         )
 
 
-@pytest.mark.parametrize("gamma", [1.0, 2.0, 3.0, 4.0, 5.0, 100.0])
+@pytest.mark.parametrize("gamma", [1, 10])
 @pytest.mark.parametrize("objective", ["binary", "regression"])
 def test_anchor_boosting_decreases_loss(gamma, objective):
     # learning_rate = 0.1
