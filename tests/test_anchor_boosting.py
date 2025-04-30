@@ -12,14 +12,6 @@ def test_anchor_boosting_second_order(gamma, objective):
     learning_rate = 0.1
     num_leaves = 5
     n = 200
-    honest_split_ratio = 0.4
-
-    # rng = np.random.default_rng(0)
-    # mask = np.zeros(n, dtype=bool)
-    # mask[:int(n * honest_split_ratio)] = True
-
-    # for idx in range(10):
-    #     rng.shuffle(mask)
 
     x, y, a = simulate(f1, n=n, shift=0, seed=0)
 
@@ -31,13 +23,10 @@ def test_anchor_boosting_second_order(gamma, objective):
         num_boost_round=10,
         num_leaves=num_leaves,
         objective=objective,
-        honest_split_ratio=honest_split_ratio,
-        honest_splits=False,
         learning_rate=learning_rate,
     )
     model.fit(x, y, Z=a)
 
-    # x, y = x[~mask, :], y[~mask]
     f = model.predict(x, num_iteration=9, raw_score=True)
 
     leaves = model.booster.predict(
@@ -93,7 +82,6 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
     # learning_rate = 0.1
     num_leaves = 5
     n = 1000
-    # honest_split_ratio = 0.6
 
     x, y, a = simulate(f1, n=n, shift=0, seed=0)
     if objective == "binary":
@@ -175,6 +163,3 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
 #         assert np.allclose(
 #             model.booster.get_leaf_output(9, i),
 #             expected_leaf_values[i],
-#             atol=1e-5,
-#             rtol=1e-5,
-#         )

@@ -36,8 +36,6 @@ class AnchorBooster:
         gamma,
         dataset_params=None,
         num_boost_round=100,
-        honest_split_ratio=0.5,
-        honest_splits=True,
         objective="regression",
         **kwargs,
     ):
@@ -47,8 +45,6 @@ class AnchorBooster:
         self.num_boost_round = num_boost_round
         self.booster = None
         self.init_score_ = None
-        self.honest_splits = honest_splits
-        self.honest_split_ratio = honest_split_ratio
         self.objective = objective
 
     def fit(
@@ -99,23 +95,9 @@ class AnchorBooster:
         f = dataset_params["init_score"]  # scores
 
         Q, _ = np.linalg.qr(Z, mode="reduced")  # P_Z f = Q @ (Q^T @ f)
-
-        split_mask = np.ones_like(y, dtype=np.bool_)
-        leaf_mask = np.ones_like(y, dtype=np.bool_)
-
-        if self.honest_splits:
-            rng = np.random.default_rng(self.params.get("random_state", 0))
-            split_mask[: int(len(y) * self.honest_split_ratio)] = False
-            leaf_mask[int(len(y) * self.honest_split_ratio) :] = False
-
-        grad = np.empty(len(y), dtype=dtype)
+        hess = np.ones(len(y), dtype=dtype)
 
         for idx in range(self.num_boost_round):
-            if self.honest_splits:
-                perm = rng.permutation(len(y))
-                split_mask = split_mask[perm]
-                leaf_mask = leaf_mask[perm]
-
             # For regression, the gradient is grad = (y - f) + (gamma - 1) P_Z (y - f)
             if self.objective == "regression":
                 residuals = y - f
@@ -127,20 +109,12 @@ class AnchorBooster:
                 px1mp = p * (1 - p)
                 residuals = y - p
 
-            split_residuals = residuals[split_mask]
-            split_Q = Q[split_mask, :]
-            split_residuals_proj = split_Q @ (split_Q.T @ split_residuals)
+            residuals_proj = Q @ (Q.T @ residuals)
 
-            grad[~split_mask] = 0
             if self.objective == "regression":
-                grad[split_mask] = (
-                    split_residuals + (self.gamma - 1) * split_residuals_proj
-                )
+                grad = -residuals - (self.gamma - 1) * residuals_proj
             else:
-                grad[split_mask] = (
-                    split_residuals
-                    + 2 * (self.gamma - 1) * split_residuals_proj * px1mp[split_mask]
-                )
+                grad = -residuals - 2 * (self.gamma - 1) * residuals_proj * px1mp
 
             # We wish to fit one additional tree. Intuitively, one would use
             # is_finished = self.booster.update(fobj=self.objective.objective)
@@ -160,7 +134,7 @@ class AnchorBooster:
 
             # is_finished is True if there we no splits satisfying the splitting
             # criteria. c.f. https://github.com/microsoft/LightGBM/pull/6890
-            is_finished = self.booster._Booster__boost(grad, split_mask.astype(dtype))
+            is_finished = self.booster._Booster__boost(grad, hess)
 
             if is_finished:
                 print(f"Finished training after {idx} iterations.")
@@ -191,36 +165,25 @@ class AnchorBooster:
             # We do the 2nd order update
             # beta = (M^T (Id + (gamma-1) P_Z) M)^{-1} M^T (Id + (gamma-1) P_Z) (y - f)
             # As L is quadratic in f, this is the global minimizer of L w.r.t. f.
-            leaf_leaves = leaves[leaf_mask]
             if self.objective == "regression":
-                # calculate gradient `g` w.r.t. leaf values
-                leaf_residuals = residuals[leaf_mask]
-                leaf_Q = Q[leaf_mask, :]
-                leaf_residuals_proj = leaf_Q @ (leaf_Q.T @ leaf_residuals)
-                weights = -leaf_residuals - (self.gamma - 1) * leaf_residuals_proj
-
-                # M^T grad = bincount(leaves_masked, weights)
-                g = np.bincount(leaf_leaves, weights=weights, minlength=num_leaves)
+                # M^T grad = bincount(leaves_masked, grad)
+                g = np.bincount(leaves, weights=grad, minlength=num_leaves)
 
                 # M^T M = diag(np.bincount(leaves))
-                counts = np.bincount(leaf_leaves, minlength=num_leaves)
-
-                # There might be some leaves without estimation samples. Set a 1 on the
-                # diagonal to ensure pos. def. of A. The resulting leaf value will be 0.
-                counts[counts == 0] = 1
+                counts = np.bincount(leaves, minlength=num_leaves)
 
                 # M^T P_Z M = (M^T Q) @ (M^T Q)^T
                 # One could also compute this using bincount, but it appears this
                 # version using a sparse matrix is faster.
                 M = scipy.sparse.csr_matrix(
                     (
-                        np.ones_like(leaf_leaves),
-                        (np.arange(len(leaf_leaves)), leaf_leaves),
+                        np.ones_like(leaves),
+                        (np.arange(len(leaves)), leaves),
                     ),
-                    shape=(len(leaf_leaves), num_leaves),
+                    shape=(len(leaves), num_leaves),
                     dtype=dtype,
                 )
-                B = M.T.dot(leaf_Q)
+                B = M.T.dot(Q)
                 H = np.diag(counts) + (self.gamma - 1) * B @ B.T
 
             # Classification:
@@ -241,33 +204,24 @@ class AnchorBooster:
             #                        {1 - 2 * (gamma - 1) * (1 - 2 * p) P_Z (y - p)}] M
             #   + 2 * (gamma - 1) M^T diag(p * (1 - p)) P_Z diag(p * (1 - p)) M
             else:
-                leaf_px1mp = px1mp[leaf_mask]
-                leaf_residuals = residuals[leaf_mask]
-                leaf_Q = Q[leaf_mask, :]
-                leaf_residuals_proj = leaf_Q @ (leaf_Q.T @ leaf_residuals)
-                weights = (
-                    -leaf_residuals
-                    - 2 * (self.gamma - 1) * leaf_residuals_proj * leaf_px1mp
-                )
-                # We can calculate M^T grad = bincount(leaves_masked, weights)
-                g = np.bincount(leaf_leaves, weights=weights, minlength=num_leaves)
+                # M^T grad = bincount(leaves, grad)
+                g = np.bincount(leaves, weights=grad, minlength=num_leaves)
 
-                weights = leaf_px1mp * (
-                    1 - 2 * (self.gamma - 1) * (1 - 2 * p) * leaf_residuals_proj
+                weights = px1mp * (
+                    1 - 2 * (self.gamma - 1) * (1 - 2 * p) * residuals_proj
                 )
-                counts = np.bincount(leaf_leaves, weights=weights, minlength=num_leaves)
-                counts[counts == 0] = 1
+                counts = np.bincount(leaves, weights=weights, minlength=num_leaves)
 
                 # We directly compute M <- diag(p * (1 - p)) M
                 M = scipy.sparse.csr_matrix(
                     (
-                        leaf_px1mp,
-                        (np.arange(len(leaf_leaves)), leaf_leaves),
+                        px1mp,
+                        (np.arange(len(leaves)), leaves),
                     ),
-                    shape=(len(leaf_leaves), num_leaves),
+                    shape=(len(leaves), num_leaves),
                     dtype=dtype,
                 )
-                B = M.T.dot(leaf_Q)  # M^T @ Q of shape (num_leaves, num_anchors)
+                B = M.T.dot(Q)  # M^T @ Q of shape (num_leaves, num_anchors)
                 H = np.diag(counts) + 2 * (self.gamma - 1) * B @ B.T
 
             # Compute the 2nd order update
