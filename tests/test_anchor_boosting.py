@@ -8,7 +8,7 @@ from anchorboosting.simulate import f1, simulate
 
 
 @pytest.mark.parametrize("gamma", [1.0, 2.0, 100])
-@pytest.mark.parametrize("objective", ["regression", "binary"])
+@pytest.mark.parametrize("objective", ["regression", "binary", "probit"])
 def test_anchor_boosting_second_order(gamma, objective):
     learning_rate = 0.1
     num_leaves = 5
@@ -16,7 +16,7 @@ def test_anchor_boosting_second_order(gamma, objective):
 
     x, y, a = simulate(f1, n=n, shift=0, seed=0)
 
-    if objective == "binary":
+    if objective in ["binary", "probit"]:
         y = (y > 0).astype(int)
 
     model = AnchorBooster(
@@ -48,9 +48,24 @@ def test_anchor_boosting_second_order(gamma, objective):
             np.sum(-np.log(np.where(y == 1, p, 1 - p)))
             + (gamma - 1) * residuals.T @ Pa_residuals
         )
+    
+    def probit_loss(leaf_values):
+        scores = f + leaf_values[leaves]
+        p = scipy.stats.norm.cdf(scores)
+        dp = scipy.stats.norm.pdf(scores)
+        l = -np.log(np.where(y==1, p, 1 - p))
+        dl = np.where(y==1, - dp / p, dp / (1 - p))
+
+        Pa_dl = a @ np.linalg.solve(a.T @ a, a.T @ dl)
+        return (
+            np.sum(l)
+            + (gamma - 1) * dl.T @ Pa_dl
+        )
 
     if objective == "regression":
         loss = regression_loss
+    elif objective == "probit":
+        loss = probit_loss
     else:
         loss = classification_loss
 
@@ -78,13 +93,13 @@ def test_anchor_boosting_second_order(gamma, objective):
 
 
 @pytest.mark.parametrize("gamma", [1, 10])
-@pytest.mark.parametrize("objective", ["binary", "regression"])
+@pytest.mark.parametrize("objective", ["binary", "regression", "probit"])
 def test_anchor_boosting_decreases_loss(gamma, objective):
     num_leaves = 5
     n = 1000
 
     x, y, a = simulate(f1, n=n, shift=0, seed=0)
-    if objective == "binary":
+    if objective in ["binary", "probit"]:
         y = (y > 0).astype(int)
 
     model = AnchorBooster(
@@ -108,8 +123,25 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
         return np.mean(
             -np.log(np.where(y == 1, p, 1 - p)) + (gamma - 1) * np.square(Pa_residuals)
         )
+    
+    def probit_loss(y, f, a):
+        p = scipy.stats.norm.cdf(f)
+        dp = scipy.stats.norm.pdf(f)
+        l = -np.log(np.where(y==1, p, 1 - p))
+        dl = np.where(y==1, - dp / p, dp / (1 - p))
 
-    loss = regression_loss if objective == "regression" else classification_loss
+        Pa_dl = a @ np.linalg.solve(a.T @ a, a.T @ dl)
+        return (
+            np.sum(l)
+            + (gamma - 1) * dl.T @ Pa_dl
+        )
+
+    if objective == "regression":
+        loss = regression_loss
+    elif objective == "probit":
+        loss = probit_loss
+    else:
+        loss = classification_loss
 
     loss_value = np.inf
     for idx in range(10):

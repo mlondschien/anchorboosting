@@ -76,11 +76,14 @@ class AnchorBooster:
 
         dtype = np.result_type(Z, y)
 
+
         if self.objective == "regression":
             self.init_score_ = np.mean(y)
+        elif self.objective == "probit":
+            self.init_score_ = scipy.stats.norm.ppf(np.mean(y))
         else:
             self.init_score_ = np.log(np.mean(y) / (1 - np.mean(y)))
-            
+
         if self.objective != "regression" and not np.isin(y, [0, 1]).all():
             raise ValueError("For binary classification, y values must be in {0, 1}.")
 
@@ -101,30 +104,38 @@ class AnchorBooster:
         f = dataset_params["init_score"]  # scores
 
         Q, _ = np.linalg.qr(Z, mode="reduced")  # P_Z f = Q @ (Q^T @ f)
-        hess = np.ones(len(y), dtype=dtype)
+
         for idx in range(self.num_boost_round):
             # For regression, the gradient is grad = (y - f) + (gamma - 1) P_Z (y - f)
             if self.objective == "regression":
                 residuals = y - f
+                residuals_proj = Q @ (Q.T @ residuals)
+                grad = -residuals - (self.gamma - 1) * residuals_proj
+                hess = np.ones(len(y), dtype=dtype)
 
             # For classification, predictions are p = 1 / (1 + exp(-f) and the gradient
             # grad = (y - p) - 2 * (gamma - 1) P_Z (y - p) * p * (1 - p)
-            else:
+            elif self.objective in ["binary", "classification"]:
                 p = scipy.special.expit(f)
                 px1mp = p * (1 - p)
                 residuals = y - p
-
-            residuals_proj = Q @ (Q.T @ residuals)
-
-            if self.objective == "regression":
-                grad = -residuals - (self.gamma - 1) * residuals_proj
-            else:
+                residuals_proj = Q @ (Q.T @ residuals)
                 grad = -residuals - 2 * (self.gamma - 1) * residuals_proj * px1mp
                 # p (1 - p) is the hessian is gamma = 1. This is used only for the
                 # `min_hessian_in_leaf` parameter to avoid numerical instabilities.
                 # If the booster creates a leaf with very small sum( p * (1 - p) ),
                 # the hessian H below will be close to singular.
                 hess = px1mp
+            elif self.objective == "probit":
+                p = scipy.stats.norm.cdf(f)
+                dp = scipy.stats.norm.pdf(f)
+                A = np.where(y == 1, - 1 / p, 1 / (1 - p))
+                dl = A * dp
+                hess = -f * dp * A + dp**2 * A**2
+                dddl = (f**2 - 1) * dp * A - 3 * f * dp**2 * A**2 + 2 * dp**3 * A**3
+                
+                dl_proj = Q @ (Q.T @ dl)
+                grad = dl + 2 * (self.gamma - 1) * dl_proj * hess
             # We wish to fit one additional tree. Intuitively, one would use
             # is_finished = self.booster.update(fobj=self.objective.objective)
             # for this. This makes a call to self.__inner_predict(0) to get the current
@@ -212,7 +223,7 @@ class AnchorBooster:
             #                        {1 - 2 * (gamma - 1) * (1 - 2 * p) P_Z (y - p)}] M
             #   + 2 * (gamma - 1) M^T diag(p * (1 - p)) P_Z diag(p * (1 - p)) M
             #
-            else:
+            elif self.objective in ["binary", "classification"]:
                 # Note that 
                 # M^T grad = bincount(leaves, grad)
                 # grad = - (y - p) - 2 * (gamma - 1) P_Z (y - p) * p * (1 - p)
@@ -228,6 +239,22 @@ class AnchorBooster:
                 M = scipy.sparse.csr_matrix(
                     (
                         px1mp,
+                        (np.arange(len(leaves)), leaves),
+                    ),
+                    shape=(len(leaves), num_leaves),
+                    dtype=dtype,
+                )
+                B = M.T.dot(Q)  # M^T @ Q of shape (num_leaves, num_anchors)
+                H = np.diag(counts) + 2 * (self.gamma - 1) * B @ B.T
+            elif self.objective == "probit":
+                g = np.bincount(leaves, weights=grad, minlength=num_leaves)
+
+                weights = hess + 2 * (self.gamma - 1) * dl_proj * dddl
+                counts = np.bincount(leaves, weights=weights, minlength=num_leaves) + self.params.get("lambda_l2", 0)
+
+                M = scipy.sparse.csr_matrix(
+                    (
+                        hess,
                         (np.arange(len(leaves)), leaves),
                     ),
                     shape=(len(leaves), num_leaves),
@@ -269,5 +296,7 @@ class AnchorBooster:
 
         if self.objective in ["classification", "binary"] and not raw_score:
             return scipy.special.expit(scores + self.init_score_)
+        elif self.objective == "probit" and not raw_score:
+            return scipy.stats.norm.cdf(scores + self.init_score_)
         else:
             return scores + self.init_score_
