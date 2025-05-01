@@ -190,7 +190,9 @@ class AnchorBooster:
                 g = np.bincount(leaves, weights=grad, minlength=num_leaves)
 
                 # M^T M = diag(np.bincount(leaves))
-                counts = np.bincount(leaves, minlength=num_leaves) + self.params.get("lambda_l2", 0)
+                counts = np.bincount(leaves, minlength=num_leaves) + self.params.get(
+                    "lambda_l2", 0
+                )
                 # M^T P_Z M = (M^T Q) @ (M^T Q)^T
                 # One could also compute this using bincount, but it appears this
                 # version using a sparse matrix is faster.
@@ -227,13 +229,15 @@ class AnchorBooster:
                 # Note that 
                 # M^T grad = bincount(leaves, grad)
                 # grad = - (y - p) - 2 * (gamma - 1) P_Z (y - p) * p * (1 - p)
-                
+
                 g = np.bincount(leaves, weights=grad, minlength=num_leaves)
 
                 weights = px1mp * (
                     1 - 2 * (self.gamma - 1) * (1 - 2 * p) * residuals_proj
-                ) 
-                counts = np.bincount(leaves, weights=weights, minlength=num_leaves) + self.params.get("lambda_l2", 0)
+                )
+                counts = np.bincount(
+                    leaves, weights=weights, minlength=num_leaves
+                ) + self.params.get("lambda_l2", 0)
 
                 # We directly compute M <- diag(p * (1 - p)) M
                 M = scipy.sparse.csr_matrix(
