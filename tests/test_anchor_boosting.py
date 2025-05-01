@@ -148,7 +148,7 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
         loss_value = new_loss_value
 
 
-@pytest.mark.parametrize("objective", ["regression", "binary"])
+@pytest.mark.parametrize("objective", ["regression", "logistic"])
 @pytest.mark.parametrize(
     "parameters",
     [
@@ -162,15 +162,13 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
 def test_compare_anchor_boosting_to_lgbm(objective, parameters):
     X, y, a = simulate(f1, shift=0, seed=0)
 
-    if objective == "binary":
+    if objective == "logistic":
         y = (y > 0).astype(int)
-    else:
-        y = y - y.mean()
 
     lgbm_model = lgb.train(
         params={
             "learning_rate": 0.1,
-            "objective": objective,
+            "objective": "binary" if objective == "logistic" else objective,
             **parameters,
         },
         train_set=lgb.Dataset(X, y),
@@ -189,3 +187,21 @@ def test_compare_anchor_boosting_to_lgbm(objective, parameters):
     anchor_booster_pred = anchor_booster.predict(X)
 
     np.testing.assert_allclose(lgbm_pred, anchor_booster_pred, rtol=1e-5)
+
+
+@pytest.mark.parametrize("objective", ["regression", "logistic", "probit"])
+def test_anchor_booster_init_score(objective):
+    X, y, a = simulate(f1, shift=0, seed=0)
+
+    if objective in ["logistic", "probit"]:
+        y = (y > 0).astype(int)
+
+    anchor_booster = AnchorBooster(
+        gamma=1,
+        num_boost_round=0,
+        objective=objective,
+        learning_rate=0.1,
+    ).fit(X, y, Z=a)
+
+    predictions = anchor_booster.predict(X)
+    assert np.allclose(predictions, np.ones_like(y) * y.mean())

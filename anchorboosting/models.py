@@ -152,6 +152,11 @@ class AnchorBooster:
                     - 3 * f * dp**2 * A**2
                     + 2 * dp**3 * A**3
                 )
+            else:
+                raise ValueError(
+                    "Objective must be one of 'regression', 'logistic', or 'probit'. "
+                    f" Got {self.objective}."
+                )
 
             if self.honest_splits:
                 Q_ = Q[split_mask, :]
@@ -291,7 +296,7 @@ class AnchorBooster:
 
         scores = self.booster.predict(X, num_iteration=num_iteration, raw_score=True)
 
-        if self.objective in ["classification", "binary"] and not raw_score:
+        if self.objective in ["classification", "binary", "logistic"] and not raw_score:
             return scipy.special.expit(scores + self.init_score_)
         elif self.objective == "probit" and not raw_score:
             return scipy.stats.norm.cdf(scores + self.init_score_)
