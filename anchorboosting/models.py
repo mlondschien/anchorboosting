@@ -36,6 +36,9 @@ class AnchorBooster:
         dataset_params=None,
         num_boost_round=100,
         objective="regression",
+        honest_splits=False,
+        honest_splits_ratio=0.5,
+        subsample=1.0,
         **kwargs,
     ):
         self.gamma = gamma
@@ -45,6 +48,9 @@ class AnchorBooster:
         self.booster = None
         self.init_score_ = None
         self.objective = objective
+        self.honest_splits = honest_splits
+        self.honest_splits_ratio = honest_splits_ratio
+        self.subsample = subsample
 
     def fit(
         self,
@@ -76,7 +82,6 @@ class AnchorBooster:
 
         dtype = np.result_type(Z, y)
 
-
         if self.objective == "regression":
             self.init_score_ = np.mean(y)
         elif self.objective == "probit":
@@ -105,37 +110,65 @@ class AnchorBooster:
 
         Q, _ = np.linalg.qr(Z, mode="reduced")  # P_Z f = Q @ (Q^T @ f)
 
-        for idx in range(self.num_boost_round):
-            # For regression, the gradient is grad = (y - f) + (gamma - 1) P_Z (y - f)
-            if self.objective == "regression":
-                residuals = y - f
-                residuals_proj = Q @ (Q.T @ residuals)
-                grad = -residuals - (self.gamma - 1) * residuals_proj
-                hess = np.ones(len(y), dtype=dtype)
+        if self.honest_splits:
+            n_split = int(len(y) * self.honest_splits_ratio * self.subsample)
 
-            # For classification, predictions are p = 1 / (1 + exp(-f) and the gradient
-            # grad = (y - p) - 2 * (gamma - 1) P_Z (y - p) * p * (1 - p)
-            elif self.objective in ["binary", "classification"]:
+            split_mask = np.zeros(len(y), dtype=bool)
+            split_mask[:n_split] = True
+            leaf_mask = np.zeros(len(y), dtype=bool)
+            leaf_mask[n_split : int(len(y) * self.subsample)] = True
+            rng = np.random.default_rng(0)
+
+        for idx in range(self.num_boost_round):
+            if self.honest_splits:
+                perm = rng.permutation(len(y))
+                split_mask = split_mask[perm]
+                leaf_mask = leaf_mask[perm]
+
+            # For regression, the loss (without anchor) is
+            # loss(f, y) = 0.5 * || y - f ||^2
+            if self.objective == "regression":
+                r = f - y  # d/df loss(f, y)
+                dr = np.ones(len(y), dtype=dtype)  # d^2/df^2 loss(f, y)
+                ddr = np.zeros(len(y), dtype=dtype)  # d^3/df^3 loss(f, y)
+            # For logistic regression, the loss (without anchor) is
+            # loss(f, y) = - sum_i (y_i log(p_i) + (1 - y_i) log(1 - p_i))
+            elif self.objective == "logistic":
                 p = scipy.special.expit(f)
-                px1mp = p * (1 - p)
-                residuals = y - p
-                residuals_proj = Q @ (Q.T @ residuals)
-                grad = -residuals - 2 * (self.gamma - 1) * residuals_proj * px1mp
-                # p (1 - p) is the hessian is gamma = 1. This is used only for the
-                # `min_hessian_in_leaf` parameter to avoid numerical instabilities.
-                # If the booster creates a leaf with very small sum( p * (1 - p) ),
-                # the hessian H below will be close to singular.
-                hess = px1mp
+                r = p - y  # score residuals: r(f, y) = d/df loss(f, y)
+                dr = p * (1 - p)  # d/df r(f, y) = d^2/df^2 loss(f, y)
+                ddr = p * (1 - p) * (1 - 2 * p)  # d^3/df^3 loss(f, y)
+            # For probit regression, the loss (without anchor) is
+            # loss(f, y) = - sum_i (y_i log(p_i) + (1 - y_i) log(1 - p_i))
+            # where p_i = P(f > 0) (Gaussian cdf)
             elif self.objective == "probit":
                 p = scipy.stats.norm.cdf(f)
-                dp = scipy.stats.norm.pdf(f)
-                A = np.where(y == 1, - 1 / p, 1 / (1 - p))
-                dl = A * dp
-                hess = -f * dp * A + dp**2 * A**2
-                dddl = (f**2 - 1) * dp * A - 3 * f * dp**2 * A**2 + 2 * dp**3 * A**3
-                
-                dl_proj = Q @ (Q.T @ dl)
-                grad = dl + 2 * (self.gamma - 1) * dl_proj * hess
+                dp = scipy.stats.norm.pdf(f)  # d/df p(f)
+                A = np.where(y == 1, -1 / p, 1 / (1 - p))
+                r = A * dp  # d/df loss(f, y)
+                dr = -f * dp * A + dp**2 * A**2  # d^2/df^2 loss(f, y)
+                ddr = (
+                    (f**2 - 1) * dp * A
+                    - 3 * f * dp**2 * A**2
+                    + 2 * dp**3 * A**3
+                )
+
+            if self.honest_splits:
+                Q_ = Q[split_mask, :]
+                r_ = r[split_mask]
+                dr_ = dr[split_mask]
+                r_proj = Q_ @ (Q_.T @ r_)
+
+                grad = np.zeros(len(y), dtype=dtype)
+                grad[split_mask] = r_ + 2 * (self.gamma - 1) * r_proj * dr_
+                hess = np.zeros(len(y), dtype=dtype)
+                hess[split_mask] = dr_
+
+            else:
+                r_proj = Q @ (Q.T @ r)
+                grad = r + (self.gamma - 1) * r_proj * dr
+                hess = dr
+
             # We wish to fit one additional tree. Intuitively, one would use
             # is_finished = self.booster.update(fobj=self.objective.objective)
             # for this. This makes a call to self.__inner_predict(0) to get the current
@@ -154,6 +187,8 @@ class AnchorBooster:
 
             # is_finished is True if there we no splits satisfying the splitting
             # criteria. c.f. https://github.com/microsoft/LightGBM/pull/6890
+            # The hessian is used only for the `min_hessian_in_leaf` parameter to
+            # avoid numerical instabilities.
             is_finished = self.booster._Booster__boost(grad, hess)
 
             if is_finished:
@@ -165,107 +200,65 @@ class AnchorBooster:
             ).flatten()
             num_leaves = np.max(leaves) + 1
 
+            if self.honest_splits:
+                r_ = r[leaf_mask]
+                dr_ = dr[leaf_mask]
+                Q_ = Q[leaf_mask, :]
+                r_proj = Q_ @ (Q_.T @ r_)
+                grad = r_ + 2 * (self.gamma - 1) * r_proj * dr_
+                leaves_ = leaves[leaf_mask]
+                ddr_ = ddr[leaf_mask]
+            else:
+                leaves_ = leaves
+                dr_ = dr
+                ddr_ = ddr
+
             # We wish to do 2nd order updates in the leaves. Since the anchor regression
             # objective is quadratic, for regression a 2nd order update is equal to the
             # global minimizer.
             # Let M be the one-hot encoding of the tree's leaf assignments. That is,
             # M[i, j] = 1 if leaves[i] == j else 0.
-
-            # Regression
-            # The anchor regression objective is
-            # L = || y - f ||^2 + (gamma - 1) || P_Z (y - f) ||^2
-            # The gradient of the anchor regression objective w.r.t. f is
-            # g = - (y - f) - (gamma - 1) P_Z (y - f) = - (Id + (gamma - 1)) P_Z (y - f)
-            # The hessian of the anchor regression objective w.r.t. f is
-            # H = Id + (gamma - 1) P_Z
-            # The gradient of the anchor regression objective w.r.t. the leaf values is
-            # g = - M^T (Id + (gamma - 1) P_Z) (y - f)
-            # The hessian of the anchor regression objective w.r.t. the leaf values is
-            # H = M^T (Id + (gamma - 1) P_Z) M
-            # We do the 2nd order update
-            # beta = (M^T (Id + (gamma-1) P_Z) M)^{-1} M^T (Id + (gamma-1) P_Z) (y - f)
-            # As L is quadratic in f, this is the global minimizer of L w.r.t. f.
-            if self.objective == "regression":
-                # M^T grad = bincount(leaves_masked, grad)
-                g = np.bincount(leaves, weights=grad, minlength=num_leaves)
-
-                # M^T M = diag(np.bincount(leaves))
-                counts = np.bincount(leaves, minlength=num_leaves) + self.params.get(
-                    "lambda_l2", 0
-                )
-                # M^T P_Z M = (M^T Q) @ (M^T Q)^T
-                # One could also compute this using bincount, but it appears this
-                # version using a sparse matrix is faster.
-                M = scipy.sparse.csr_matrix(
-                    (
-                        np.ones_like(leaves),
-                        (np.arange(len(leaves)), leaves),
-                    ),
-                    shape=(len(leaves), num_leaves),
-                    dtype=dtype,
-                )
-                B = M.T.dot(Q)
-                H = np.diag(counts) + (self.gamma - 1) * B @ B.T
-
-            # Classification:
-            # The anchor classification objective (loss) is
-            # L = - sum_i (y_i log(p_i) + (1 - y_i) log(1 - p_i))
-            #                                     + (gamma - 1) || P_Z (y - p) ||^2
-            # The gradient of the anchor classification objective w.r.t. f is
-            # g = - (y - p) - 2 * (gamma - 1) P_Z (y - p) * p * (1 - p)
-            # The hessian of the anchor classification objective w.r.t. f is
-            # H = diag[p * (1 - p) * {1 - 2 * (gamma - 1) * (1 - 2 * p) P_Z (y - p)}]
-            #     + 2 * (gamma - 1) * diag(p * (1 - p)) * P_Z * diag(p * (1 - p))
-            # The gradient of the anchor classification objective w.r.t. the leaf values
-            # is
-            # g = - M^T [ (y - p) - 2 * (gamma - 1) P_Z (y - p) * p * (1 - p) ]
-            # The hessian of the anchor classification objective w.r.t. the leaf values
-            # is
-            # H = M^T diag[p * (1 - p) *
-            #                        {1 - 2 * (gamma - 1) * (1 - 2 * p) P_Z (y - p)}] M
-            #   + 2 * (gamma - 1) M^T diag(p * (1 - p)) P_Z diag(p * (1 - p)) M
+            # We have
+            # r = d/df loss(f, y)
+            # dr = d^2/df^2 loss(f, y)
+            # ddr = d^3/df^3 loss(f, y)
+            # The anchor loss is
+            # L = loss(f, y) + (gamma - 1) * || P_Z r ||^2
+            # d/df L = d/df loss(f, y) + 2 * (gamma - 1) P_Z r * dr
+            # d^2/df^2 L = diag(d^2/df^2 loss(f, y)) + 2 * (gamma - 1) diag(P_Z r * ddr)
+            #            + 2 * (gamma - 1) diag(dr) P_Z diag(dr)
             #
-            elif self.objective in ["binary", "classification"]:
-                # Note that 
-                # M^T grad = bincount(leaves, grad)
-                # grad = - (y - p) - 2 * (gamma - 1) P_Z (y - p) * p * (1 - p)
+            # We do the 2nd order update
+            # beta = (M^T [d^2/df^2 L] M)^{-1} M^T [d/df L]
 
-                g = np.bincount(leaves, weights=grad, minlength=num_leaves)
+            # M^T x = bincount(leaves_masked, weights=x)
+            g = np.bincount(leaves_, weights=grad, minlength=num_leaves)
 
-                weights = px1mp * (
-                    1 - 2 * (self.gamma - 1) * (1 - 2 * p) * residuals_proj
-                )
-                counts = np.bincount(
-                    leaves, weights=weights, minlength=num_leaves
-                ) + self.params.get("lambda_l2", 0)
+            # M^T diag(x) M = diag(np.bincount(leaves, weights=x))
+            counts = np.bincount(
+                leaves,
+                weights=dr_ + (self.gamma - 1) * r_proj * ddr_,
+                minlength=num_leaves,
+            )
+            counts += self.params.get("lambda_l2", 0)
 
-                # We directly compute M <- diag(p * (1 - p)) M
-                M = scipy.sparse.csr_matrix(
-                    (
-                        px1mp,
-                        (np.arange(len(leaves)), leaves),
-                    ),
-                    shape=(len(leaves), num_leaves),
-                    dtype=dtype,
-                )
-                B = M.T.dot(Q)  # M^T @ Q of shape (num_leaves, num_anchors)
-                H = np.diag(counts) + 2 * (self.gamma - 1) * B @ B.T
-            elif self.objective == "probit":
-                g = np.bincount(leaves, weights=grad, minlength=num_leaves)
+            # If honest_splits is True, it can occur that some leaves have no "leaf"
+            # samples. We make the hessian invertible.
+            counts[counts == 0] = 1
 
-                weights = hess + 2 * (self.gamma - 1) * dl_proj * dddl
-                counts = np.bincount(leaves, weights=weights, minlength=num_leaves) + self.params.get("lambda_l2", 0)
-
-                M = scipy.sparse.csr_matrix(
-                    (
-                        hess,
-                        (np.arange(len(leaves)), leaves),
-                    ),
-                    shape=(len(leaves), num_leaves),
-                    dtype=dtype,
-                )
-                B = M.T.dot(Q)  # M^T @ Q of shape (num_leaves, num_anchors)
-                H = np.diag(counts) + 2 * (self.gamma - 1) * B @ B.T
+            # Mdr^T P_Z Mdr = (Mdr^T Q) @ (Mdr^T Q)^T
+            # One could also compute this using bincount, but it appears this
+            # version using a sparse matrix is faster.
+            Mdr = scipy.sparse.csr_matrix(
+                (
+                    dr_,
+                    (np.arange(len(leaves_)), leaves_),
+                ),
+                shape=(len(leaves_), num_leaves),
+                dtype=dtype,
+            )
+            B = Mdr.T.dot(Q)
+            H = np.diag(counts) + (self.gamma - 1) * B @ B.T
 
             # Compute the 2nd order update
             leaf_values = -np.linalg.solve(H, g) * self.params.get("learning_rate", 0.1)
