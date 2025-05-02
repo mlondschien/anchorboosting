@@ -33,7 +33,8 @@ class AnchorBooster:
         is True. Must be in (0, 1).
     subsample: float, optional, default=1.0
         The fraction of samples to use for each boosting iteration. Must be in (0, 1].
-        Acts multiplicatively with ``honest_splits_ratio``.
+        Acts multiplicatively with ``honest_splits_ratio``. Not supported when
+        ``honest_splits`` is False.
     **kwargs: dict
         Additional parameters for the LightGBM model. See LightGBM documentation for
         details.

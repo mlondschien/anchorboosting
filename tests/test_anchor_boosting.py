@@ -1,3 +1,5 @@
+from functools import partial
+
 import lightgbm as lgb
 import numpy as np
 import pytest
@@ -7,12 +9,14 @@ from anchorboosting import AnchorBooster
 from anchorboosting.simulate import f1, simulate
 
 
+@pytest.mark.parametrize("honest_splits_ratio", [None, 0.3])
 @pytest.mark.parametrize("gamma", [1.0, 2.0, 100])
 @pytest.mark.parametrize("objective", ["regression", "logistic", "probit"])
-def test_anchor_boosting_second_order(gamma, objective):
+def test_anchor_boosting_second_order(gamma, objective, honest_splits_ratio):
     learning_rate = 0.1
     num_leaves = 5
     n = 200
+    num_boost_round = 10
 
     x, y, a = simulate(f1, n=n, shift=0, seed=0)
 
@@ -21,12 +25,22 @@ def test_anchor_boosting_second_order(gamma, objective):
 
     model = AnchorBooster(
         gamma=gamma,
-        num_boost_round=10,
+        num_boost_round=num_boost_round,
         num_leaves=num_leaves,
         objective=objective,
         learning_rate=learning_rate,
+        honest_splits=honest_splits_ratio is not None,
+        honest_splits_ratio=honest_splits_ratio,
     )
     model.fit(x, y, Z=a)
+
+    mask = np.ones(n, dtype=bool)
+    if honest_splits_ratio is not None:
+        rng = np.random.default_rng(0)
+        mask[int(n * honest_splits_ratio) :] = False
+        for i in range(num_boost_round):
+            perm = rng.permutation(n)
+            mask = mask[perm]
 
     f = model.predict(x, num_iteration=9, raw_score=True)
 
@@ -34,37 +48,40 @@ def test_anchor_boosting_second_order(gamma, objective):
         x, pred_leaf=True, start_iteration=9, num_iteration=1
     ).flatten()
 
-    def regression_loss(leaf_values):
-        residuals = y - f - leaf_values[leaves]
-        Pa_residuals = a @ np.linalg.solve(a.T @ a, a.T @ residuals)
+    def regression_loss(leaf_values, mask):
+        residuals = y[mask] - f[mask] - leaf_values[leaves[mask]]
+        Pa_residuals = a[mask, :] @ np.linalg.solve(a.T @ a, a[mask, :].T @ residuals)
+        Pa_residuals *= len(mask) / mask.sum()
         return np.sum(np.square(residuals)) + (gamma - 1) * residuals.T @ Pa_residuals
 
-    def classification_loss(leaf_values):
-        scores = f + leaf_values[leaves]
+    def classification_loss(leaf_values, mask):
+        scores = f[mask] + leaf_values[leaves[mask]]
         p = 1 / (1 + np.exp(-scores))
-        residuals = y - p
-        Pa_residuals = a @ np.linalg.solve(a.T @ a, a.T @ residuals)
+        residuals = y[mask] - p
+        Pa_residuals = a[mask, :] @ np.linalg.solve(a.T @ a, a[mask, :].T @ residuals)
+        Pa_residuals *= len(mask) / mask.sum()
         return (
-            np.sum(-np.log(np.where(y == 1, p, 1 - p)))
+            np.sum(-np.log(np.where(y[mask] == 1, p, 1 - p)))
             + (gamma - 1) / 2 * residuals.T @ Pa_residuals
         )
 
-    def probit_loss(leaf_values):
-        scores = f + leaf_values[leaves]
+    def probit_loss(leaf_values, mask):
+        scores = f[mask] + leaf_values[leaves[mask]]
         p = scipy.stats.norm.cdf(scores)
         dp = scipy.stats.norm.pdf(scores)
-        losses = -np.log(np.where(y == 1, p, 1 - p))
-        dl = np.where(y == 1, -dp / p, dp / (1 - p))
+        losses = -np.log(np.where(y[mask] == 1, p, 1 - p))
+        dl = np.where(y[mask] == 1, -dp / p, dp / (1 - p))
 
-        Pa_dl = a @ np.linalg.solve(a.T @ a, a.T @ dl)
+        Pa_dl = a[mask, :] @ np.linalg.solve(a.T @ a, a[mask, :].T @ dl)
+        Pa_dl *= len(mask) / mask.sum()
         return np.sum(losses) + (gamma - 1) / 2 * dl.T @ Pa_dl
 
     if objective == "regression":
-        loss = regression_loss
+        loss = partial(regression_loss, mask=mask)
     elif objective == "probit":
-        loss = probit_loss
+        loss = partial(probit_loss, mask=mask)
     else:
-        loss = classification_loss
+        loss = partial(classification_loss, mask=mask)
 
     def vectorize(f):
         def f_(x):
