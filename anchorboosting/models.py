@@ -24,7 +24,16 @@ class AnchorBooster:
     num_boost_round: int
         The number of boosting iterations. Default is 100.
     objective: str, optional, default="regression"
-        The objective function to use. Can be "regression" or "binary".
+        The objective function to use. Can be "regression", "logistic", or "probit".
+    honest_splits: bool, optional, default=False
+        If True, uses a different part of the training data to compute tree splits and
+        leaf values.
+    honest_splits_ratio: float, optional, default=0.5
+        Proportion of the training data to use to compute tree splits when honest_splits
+        is True. Must be in (0, 1).
+    subsample: float, optional, default=1.0
+        The fraction of samples to use for each boosting iteration. Must be in (0, 1].
+        Acts multiplicatively with ``honest_splits_ratio``.
     **kwargs: dict
         Additional parameters for the LightGBM model. See LightGBM documentation for
         details.
@@ -162,10 +171,13 @@ class AnchorBooster:
                 Q_ = Q[split_mask, :]
                 r_ = r[split_mask]
                 dr_ = dr[split_mask]
-                r_proj = Q_ @ (Q_.T @ r_)
+                # Q_ @ (Q_.T @ r_) is Z[mask, :] @ (Z.T @ Z) @ (Z[mask, :]^T @ r_)
+                # That is, we use the full Z matrix to compute its covariance. However,
+                # different number of samples are used, so we need to rescale.
+                r_proj = Q_ @ (Q_.T @ r_) / (self.honest_splits_ratio * self.subsample)
 
                 grad = np.zeros(len(y), dtype=dtype)
-                grad[split_mask] = r_ + 2 * (self.gamma - 1) * r_proj * dr_
+                grad[split_mask] = r_ + (self.gamma - 1) * r_proj * dr_
                 hess = np.zeros(len(y), dtype=dtype)
                 hess[split_mask] = dr_
 
@@ -209,14 +221,18 @@ class AnchorBooster:
                 r_ = r[leaf_mask]
                 dr_ = dr[leaf_mask]
                 Q_ = Q[leaf_mask, :]
-                r_proj = Q_ @ (Q_.T @ r_)
-                grad = r_ + 2 * (self.gamma - 1) * r_proj * dr_
+                # Q_ @ (Q_.T @ r_) is Z[mask, :] @ (Z.T @ Z) @ (Z[mask, :]^T @ r_)
+                # That is, we use the full Z matrix to compute its covariance. However,
+                # different number of samples are used, so we need to rescale.
+                r_proj = Q_ @ (Q_.T @ r_) / (self.honest_splits_ratio * self.subsample)
+                grad = r_ + (self.gamma - 1) * r_proj * dr_
                 leaves_ = leaves[leaf_mask]
                 ddr_ = ddr[leaf_mask]
             else:
                 leaves_ = leaves
                 dr_ = dr
                 ddr_ = ddr
+                Q_ = Q
 
             # We wish to do 2nd order updates in the leaves. Since the anchor regression
             # objective is quadratic, for regression a 2nd order update is equal to the
@@ -228,20 +244,20 @@ class AnchorBooster:
             # dr = d^2/df^2 loss(f, y)
             # ddr = d^3/df^3 loss(f, y)
             # The anchor loss is
-            # L = loss(f, y) + (gamma - 1) * || P_Z r ||^2
-            # d/df L = d/df loss(f, y) + 2 * (gamma - 1) P_Z r * dr
-            # d^2/df^2 L = diag(d^2/df^2 loss(f, y)) + 2 * (gamma - 1) diag(P_Z r * ddr)
-            #            + 2 * (gamma - 1) diag(dr) P_Z diag(dr)
+            # L = loss(f, y) + (gamma - 1) / 2 * || P_Z r ||^2
+            # d/df L = d/df loss(f, y) + (gamma - 1) P_Z r * dr
+            # d^2/df^2 L = diag(d^2/df^2 loss(f, y)) + (gamma - 1) diag(P_Z r * ddr)
+            #            + (gamma - 1) diag(dr) P_Z diag(dr)
             #
             # We do the 2nd order update
-            # beta = (M^T [d^2/df^2 L] M)^{-1} M^T [d/df L]
+            # beta = - (M^T [d^2/df^2 L] M)^{-1} M^T [d/df L]
 
             # M^T x = bincount(leaves_masked, weights=x)
             g = np.bincount(leaves_, weights=grad, minlength=num_leaves)
 
             # M^T diag(x) M = diag(np.bincount(leaves, weights=x))
             counts = np.bincount(
-                leaves,
+                leaves_,
                 weights=dr_ + (self.gamma - 1) * r_proj * ddr_,
                 minlength=num_leaves,
             )
@@ -262,7 +278,7 @@ class AnchorBooster:
                 shape=(len(leaves_), num_leaves),
                 dtype=dtype,
             )
-            B = Mdr.T.dot(Q)
+            B = Mdr.T.dot(Q_)
             H = np.diag(counts) + (self.gamma - 1) * B @ B.T
 
             # Compute the 2nd order update
@@ -271,7 +287,7 @@ class AnchorBooster:
             for ldx, val in enumerate(leaf_values):
                 self.booster.set_leaf_output(idx, ldx, val)
 
-            # Ensure residuals == y - self.init_score_ - self.booster.predict(X)
+            # Ensure f == self.init_score_ + self.booster.predict(X)
             f += leaf_values[leaves]
 
         return self
@@ -287,6 +303,8 @@ class AnchorBooster:
         num_iteration : int
             Number of boosting iterations to use. If -1, all are used. Else, needs to be
             in [0, num_boost_round].
+        raw_score : bool
+            If True, returns scores. If False, returns predicted probabilities.
         """
         if self.booster is None:
             raise ValueError("AnchorBoost has not yet been fitted.")
@@ -296,7 +314,7 @@ class AnchorBooster:
 
         scores = self.booster.predict(X, num_iteration=num_iteration, raw_score=True)
 
-        if self.objective in ["classification", "binary", "logistic"] and not raw_score:
+        if self.objective == "logistic" and not raw_score:
             return scipy.special.expit(scores + self.init_score_)
         elif self.objective == "probit" and not raw_score:
             return scipy.stats.norm.cdf(scores + self.init_score_)
