@@ -37,21 +37,21 @@ def test_anchor_boosting_second_order(gamma, objective, honest_splits_ratio):
     mask = np.ones(n, dtype=bool)
     if honest_splits_ratio is not None:
         rng = np.random.default_rng(0)
-        mask[int(n * honest_splits_ratio) :] = False
+        mask[: int(n * honest_splits_ratio)] = False
         for i in range(num_boost_round):
             perm = rng.permutation(n)
             mask = mask[perm]
 
-    f = model.predict(x, num_iteration=9, raw_score=True)
+    f = model.predict(x, num_iteration=num_boost_round - 1, raw_score=True)
 
     leaves = model.booster.predict(
-        x, pred_leaf=True, start_iteration=9, num_iteration=1
+        x, pred_leaf=True, start_iteration=num_boost_round - 1, num_iteration=1
     ).flatten()
 
     def regression_loss(leaf_values, mask):
         residuals = y[mask] - f[mask] - leaf_values[leaves[mask]]
         Pa_residuals = a[mask, :] @ np.linalg.solve(a.T @ a, a[mask, :].T @ residuals)
-        Pa_residuals *= len(mask) / mask.sum()
+        Pa_residuals /= mask.mean()
         return np.sum(np.square(residuals)) + (gamma - 1) * residuals.T @ Pa_residuals
 
     def classification_loss(leaf_values, mask):
@@ -59,7 +59,7 @@ def test_anchor_boosting_second_order(gamma, objective, honest_splits_ratio):
         p = 1 / (1 + np.exp(-scores))
         residuals = y[mask] - p
         Pa_residuals = a[mask, :] @ np.linalg.solve(a.T @ a, a[mask, :].T @ residuals)
-        Pa_residuals *= len(mask) / mask.sum()
+        Pa_residuals /= mask.mean()
         return (
             np.sum(-np.log(np.where(y[mask] == 1, p, 1 - p)))
             + (gamma - 1) / 2 * residuals.T @ Pa_residuals
@@ -73,7 +73,7 @@ def test_anchor_boosting_second_order(gamma, objective, honest_splits_ratio):
         dl = np.where(y[mask] == 1, -dp / p, dp / (1 - p))
 
         Pa_dl = a[mask, :] @ np.linalg.solve(a.T @ a, a[mask, :].T @ dl)
-        Pa_dl *= len(mask) / mask.sum()
+        Pa_dl /= mask.mean()
         return np.sum(losses) + (gamma - 1) / 2 * dl.T @ Pa_dl
 
     if objective == "regression":

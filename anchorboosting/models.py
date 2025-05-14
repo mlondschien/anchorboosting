@@ -102,6 +102,12 @@ class AnchorBooster:
         if self.objective != "regression" and not np.isin(y, [0, 1]).all():
             raise ValueError("For binary classification, y values must be in {0, 1}.")
 
+        if self.subsample != 1 and not self.honest_splits:
+            raise ValueError(
+                "Subsampling is not supported when honest_splits is False. "
+                "Set honest_splits=True to use subsampling."
+            )
+
         y = y.flatten()
 
         dataset_params = {
@@ -127,7 +133,7 @@ class AnchorBooster:
             split_mask[:n_split] = True
             leaf_mask = np.zeros(len(y), dtype=bool)
             leaf_mask[n_split : int(len(y) * self.subsample)] = True
-            rng = np.random.default_rng(0)
+            rng = np.random.default_rng(self.params.get("random_state", 0))
 
         for idx in range(self.num_boost_round):
             if self.honest_splits:
@@ -225,10 +231,13 @@ class AnchorBooster:
                 # Q_ @ (Q_.T @ r_) is Z[mask, :] @ (Z.T @ Z) @ (Z[mask, :]^T @ r_)
                 # That is, we use the full Z matrix to compute its covariance. However,
                 # different number of samples are used, so we need to rescale.
-                r_proj = Q_ @ (Q_.T @ r_) / (self.honest_splits_ratio * self.subsample)
+                r_proj = Q_ @ (Q_.T @ r_)
+                r_proj /= (1 - self.honest_splits_ratio) * self.subsample
                 grad = r_ + (self.gamma - 1) * r_proj * dr_
                 leaves_ = leaves[leaf_mask]
                 ddr_ = ddr[leaf_mask]
+                # if self.gamma > 1 and idx == 9:
+                #     breakpoint()
             else:
                 leaves_ = leaves
                 dr_ = dr
@@ -280,7 +289,10 @@ class AnchorBooster:
                 dtype=dtype,
             )
             B = Mdr.T.dot(Q_)
-            H = np.diag(counts) + (self.gamma - 1) * B @ B.T
+            H = (self.gamma - 1) * B @ B.T
+            if self.honest_splits_ratio is not None:
+                H /= (1 - self.honest_splits_ratio) * self.subsample
+            H += np.diag(counts)
 
             # Compute the 2nd order update
             leaf_values = -np.linalg.solve(H, g) * self.params.get("learning_rate", 0.1)
@@ -293,7 +305,7 @@ class AnchorBooster:
 
         return self
 
-    def predict(self, X, num_iteration=-1, raw_score=False):
+    def predict(self, X, raw_score=False, **kwargs):
         """
         Predict the outcome.
 
@@ -313,7 +325,7 @@ class AnchorBooster:
         if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
             X = X.to_arrow()
 
-        scores = self.booster.predict(X, num_iteration=num_iteration, raw_score=True)
+        scores = self.booster.predict(X, raw_score=True, **kwargs)
 
         if self.objective == "logistic" and not raw_score:
             return scipy.special.expit(scores + self.init_score_)
