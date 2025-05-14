@@ -5,28 +5,27 @@ import scipy
 from scipy.optimize import approx_fprime
 
 
-
 def test_probit_derivatives():
     def probit_loss(f, y):
         p = scipy.stats.norm.cdf(f)
-        return np.where(y==1, -np.log(p), -np.log(1 - p))
+        return np.where(y == 1, -np.log(p), -np.log(1 - p))
 
     def probit_grad(f, y):
         p = scipy.stats.norm.cdf(f)
         dp = scipy.stats.norm.pdf(f)
-        A = np.where(y == 1, - 1 / p, 1 / (1 - p))
+        A = np.where(y == 1, -1 / p, 1 / (1 - p))
         return A * dp
 
     def probit_hess(f, y):
         p = scipy.stats.norm.cdf(f)
         dp = scipy.stats.norm.pdf(f)
-        A = np.where(y == 1, - 1 / p, 1 / (1 - p))
+        A = np.where(y == 1, -1 / p, 1 / (1 - p))
         return -f * dp * A + dp**2 * A**2
 
     def probit_hess2(f, y):
         p = scipy.stats.norm.cdf(f)
         dp = scipy.stats.norm.pdf(f)
-        A = np.where(y == 1, -1 / p,- 1 / (p - 1))
+        A = np.where(y == 1, -1 / p, -1 / (p - 1))
         return (f**2 - 1) * dp * A - 3 * f * dp**2 * A**2 + 2 * dp**3 * A**3
 
     rtol = 1e-5
@@ -48,8 +47,10 @@ def test_probit_derivatives():
 def proj(A, f):
     return np.dot(A, np.linalg.lstsq(A, f, rcond=None)[0])
 
+
 def proj_matrix(A):
     return np.dot(np.dot(A, np.linalg.inv(A.T @ A)), A.T)
+
 
 def logistic_loss(X, beta, y, A, gamma):
     f = X @ beta
@@ -93,25 +94,25 @@ def probit_grad(X, beta, y, A, gamma):
     pdf = scipy.stats.norm.pdf(f)
     denom = np.where(y == 1, p, p - 1)
     dl = -pdf / denom
-    ddl = f * pdf / denom + pdf**2 / denom **2
-    
+    ddl = f * pdf / denom + pdf**2 / denom**2
+
     return (dl + 2 * (gamma - 1) * proj(A, dl) * ddl) @ X
+
 
 def probit_hess(X, beta, y, Z, gamma):
     f = X @ beta
 
     p = scipy.stats.norm.cdf(f)
     dp = scipy.stats.norm.pdf(f)
-    A = np.where(y == 1, -1 / p,- 1 / (p - 1))
+    A = np.where(y == 1, -1 / p, -1 / (p - 1))
     dl = A * dp
     ddl = -f * dp * A + dp**2 * A**2
     dddl = (f**2 - 1) * dp * A - 3 * f * dp**2 * A**2 + 2 * dp**3 * A**3
-    
+
     a = X.T @ np.diag(ddl) @ X
     b = 2 * X.T @ np.diag(ddl) @ proj_matrix(Z) @ np.diag(ddl) @ X
     c = 2 * X.T @ np.diag(proj(Z, dl) * dddl) @ X
     return a + (gamma - 1) * (b + c)
-
 
 
 @pytest.mark.parametrize("gamma", [1, 5])
