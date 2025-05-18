@@ -9,14 +9,15 @@ from anchorboosting import AnchorBooster
 from anchorboosting.simulate import f1, simulate
 
 
-@pytest.mark.parametrize("honest_splits_ratio", [None, 0.3])
+@pytest.mark.parametrize("honest_splits", [True, False])
 @pytest.mark.parametrize("gamma", [1.0, 2.0, 100])
 @pytest.mark.parametrize("objective", ["regression", "logistic", "probit"])
-def test_anchor_boosting_second_order(gamma, objective, honest_splits_ratio):
+def test_anchor_boosting_second_order(gamma, objective, honest_splits):
     learning_rate = 0.1
     num_leaves = 5
     n = 200
     num_boost_round = 10
+    honest_splits_ratio = 0.3
 
     x, y, a = simulate(f1, n=n, shift=0, seed=0)
 
@@ -29,13 +30,13 @@ def test_anchor_boosting_second_order(gamma, objective, honest_splits_ratio):
         num_leaves=num_leaves,
         objective=objective,
         learning_rate=learning_rate,
-        honest_splits=honest_splits_ratio is not None,
+        honest_splits=honest_splits,
         honest_splits_ratio=honest_splits_ratio,
     )
     model.fit(x, y, Z=a)
 
     mask = np.ones(n, dtype=bool)
-    if honest_splits_ratio is not None:
+    if honest_splits:
         rng = np.random.default_rng(0)
         mask[: int(n * honest_splits_ratio)] = False
         for i in range(num_boost_round):

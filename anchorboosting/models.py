@@ -156,19 +156,19 @@ class AnchorBooster:
                 ddr = p * (1 - p) * (1 - 2 * p)  # d^3/df^3 loss(f, y)
             # For probit regression, the loss (without anchor) is
             # loss(f, y) = - sum_i (y_i log(p_i) + (1 - y_i) log(1 - p_i))
-            # where p_i = P(f > 0) (Gaussian cdf)
+            # where p_i = scipy.stats.cdf(f_i)
             elif self.objective == "probit":
                 # We wish to compute the following:
                 # p = scipy.stats.norm.cdf(f)
                 # dp = scipy.stats.norm.pdf(f)  # d/df p(f)
                 # r = np.where(y == 1, -dp / p, dp / (1 - p))  # d/df loss(f, y)
-                # This is numerically unstable. Instead, we use scipy.special.log_ndtr
-                # with log_ndtr(f) = log(norm.cdf(f)).
+                # The equation for r is numerically unstable. Instead, we use
+                # scipy.special.log_ndtr, with log_ndtr(f) = log(norm.cdf(f)).
                 y_tilde = np.where(y == 1, 1, -1)
                 log_phi = -0.5 * f**2 - 0.5 * np.log(2 * np.pi)  # log(norm.pdf(f))
                 r = -y_tilde * np.exp(log_phi - scipy.special.log_ndtr(y_tilde * f))
                 dr = -f * r + r**2  # d^2/df^2 loss(f, y)
-                ddr = (f**2 - 1) * r - 3 * f * r**2 + 2 * r**3
+                ddr = (f**2 - 1) * r - 3 * f * r**2 + 2 * r**3  # d^3/df^3 loss
             else:
                 raise ValueError(
                     "Objective must be one of 'regression', 'logistic', or 'probit'. "
@@ -291,7 +291,7 @@ class AnchorBooster:
             )
             B = Mdr.T.dot(Q_)
             H = (self.gamma - 1) * B @ B.T
-            if self.honest_splits_ratio is not None:
+            if self.honest_splits:
                 H /= (1 - self.honest_splits_ratio) * self.subsample
             H += np.diag(counts)
 
