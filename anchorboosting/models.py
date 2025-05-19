@@ -366,51 +366,52 @@ class AnchorBooster:
 
         for idx in range(self.num_boost_round):
             if self.objective == "regression":
-                g = f - y
-                h = np.ones(len(y), dtype="float64")
+                grad_hess_ones = np.empty((len(y), 3), dtype="float64")
+                grad_hess_ones[:, 0] = f - y
+                grad_hess_ones[:, 1:] = 1.0
+                # g = f - y
+                # h = 1.0
             elif self.objective == "probit":
                 log_phi = -0.5 * f**2 - 0.5 * np.log(2 * np.pi)  # log(norm.pdf(f))
-                g = -y_tilde * np.exp(log_phi - scipy.special.log_ndtr(y_tilde * f))
-                h = -f * g + g**2
+                grad_hess_ones = np.empty((len(y), 3), dtype="float64")
+                grad_hess_ones[:, 0] = -y_tilde * np.exp(
+                    log_phi - scipy.special.log_ndtr(y_tilde * f)
+                )
+                grad_hess_ones[:, 1] = (
+                    -f * grad_hess_ones[:, 0] + grad_hess_ones[:, 0] ** 2
+                )
+                grad_hess_ones[:, 2] = 1.0
+                # g = -y_tilde * np.exp(log_phi - scipy.special.log_ndtr(y_tilde * f))
+                # h = -f * g + g**2
             else:
                 raise ValueError("Objective must be 'regression' or 'probit'.")
 
-            update, values = _refit_leaf_nodes(
-                leaves[:, idx],
-                g,
-                h,
-                self_copied.booster.params.get("lambda_l2", 0),
-                self_copied.booster.params.get("num_leaves", 31),
-            )
-            values *= self_copied.params.get("learning_rate", 0.1)
-            new_values = values.copy()
+            num_leaves = np.max(leaves[:, idx]) + 1
 
-            for ldx, (should_update, value) in enumerate(zip(update, values)):
-                if should_update:
-                    old_value = self_copied.booster.get_leaf_output(idx, ldx)
-                    new_values[ldx] = decay_rate * old_value + (1 - decay_rate) * value
-                    self_copied.booster.set_leaf_output(idx, ldx, new_values[ldx])
+            # We aggregate gradients, hessians, and counts over the leaves.
+            # A bincount is faster than a for loop. Still this passes 3x through the
+            # data. We use np.add.at to do this in a single pass and avoid a copy.
+            # n_obs = np.bincount(leaves[:, idx], minlength=num_leaves)
+            # sum_grad = np.bincount(leaves[:, idx], weights=g, minlength=num_leaves)
+            # sum_hess = np.bincount(leaves[:, idx], weights=h, minlength=num_leaves)
+            arr = np.zeros((num_leaves, 3), dtype=np.float64)
+            np.add.at(arr, leaves[:, idx], grad_hess_ones)
+
+            sum_grad = arr[:, 0]
+            sum_hess = arr[:, 1]
+            n_obs = arr[:, 2]
+
+            values = -sum_grad / sum_hess * self_copied.params.get("learning_rate", 0.1)
+
+            new_values = np.zeros(num_leaves, dtype="float64")
+
+            for ldx in np.where(n_obs > 0)[0]:
+                old_value = self_copied.booster.get_leaf_output(idx, ldx)
+                new_values[ldx] = (
+                    decay_rate * old_value + (1 - decay_rate) * values[ldx]
+                )
+                self_copied.booster.set_leaf_output(idx, ldx, new_values[ldx])
 
             f += new_values[leaves[:, idx]]
 
         return self_copied
-
-
-def _refit_leaf_nodes(leaves, grad, hess, lambda_l2, num_leafs):
-    n_obs = np.zeros(num_leafs)
-    sum_gradients = np.zeros(num_leafs)
-    sum_hessians = np.full(num_leafs, lambda_l2, dtype="float")
-    values = np.zeros(num_leafs)
-
-    for leaf, g, h in zip(leaves, grad, hess):
-        n_obs[leaf] += 1
-        sum_gradients[leaf] += g
-        sum_hessians[leaf] += h
-
-    # We differ with LGBM refit here. LGBM would set the leaf value to 0 if there are no
-    # refit observations in the leaf. We do not update the leaf value in this case.
-    update = n_obs > 0
-
-    values[update] = -sum_gradients[update] / sum_hessians[update]
-
-    return update, values
