@@ -1,3 +1,5 @@
+import copy
+
 import lightgbm as lgb
 import numpy as np
 import scipy
@@ -237,8 +239,7 @@ class AnchorBooster:
                 grad = r_ + (self.gamma - 1) * r_proj * dr_
                 leaves_ = leaves[leaf_mask]
                 ddr_ = ddr[leaf_mask]
-                # if self.gamma > 1 and idx == 9:
-                #     breakpoint()
+
             else:
                 leaves_ = leaves
                 dr_ = dr
@@ -334,3 +335,82 @@ class AnchorBooster:
             return scipy.stats.norm.cdf(scores + self.init_score_)
         else:
             return scores + self.init_score_
+
+    def refit(self, X, y, decay_rate=0, params=None):
+        """
+        Refit the model.
+
+        Parameters
+        ----------
+        X : numpy.ndarray, polars.DataFrame, or pyarrow.Table
+            The input data.
+        y : np.ndarray
+            The outcome.
+        Z : np.ndarray
+            Anchors.
+        """
+        self_copied = copy.deepcopy(self)
+
+        # For some reason, the model params are not copied over.
+        # https://github.com/microsoft/LightGBM/issues/6821
+        self_copied.booster.params = {**self.booster.params, **(params or {})}
+
+        if self.objective == "probit" and not np.isin(y, [0, 1]).all():
+            raise ValueError("For binary classification, y values must be in {0, 1}.")
+
+        if self.objective == "probit":
+            y_tilde = np.where(y == 1, 1, -1)
+
+        leaves = self_copied.booster.predict(X, pred_leaf=True)
+        f = np.full(len(y), self.init_score_, dtype="float64")
+
+        for idx in range(self.num_boost_round):
+            if self.objective == "regression":
+                g = f - y
+                h = np.ones(len(y), dtype="float64")
+            elif self.objective == "probit":
+                log_phi = -0.5 * f**2 - 0.5 * np.log(2 * np.pi)  # log(norm.pdf(f))
+                g = -y_tilde * np.exp(log_phi - scipy.special.log_ndtr(y_tilde * f))
+                h = -f * g + g**2
+            else:
+                raise ValueError("Objective must be 'regression' or 'probit'.")
+
+            update, values = _refit_leaf_nodes(
+                leaves[:, idx],
+                g,
+                h,
+                self_copied.booster.params.get("lambda_l2", 0),
+                self_copied.booster.params.get("num_leaves", 31),
+            )
+            values *= self_copied.params.get("learning_rate", 0.1)
+            new_values = values.copy()
+
+            for ldx, (should_update, value) in enumerate(zip(update, values)):
+                if should_update:
+                    old_value = self_copied.booster.get_leaf_output(idx, ldx)
+                    new_values[ldx] = decay_rate * old_value + (1 - decay_rate) * value
+                    self_copied.booster.set_leaf_output(idx, ldx, new_values[ldx])
+
+            f += new_values[leaves[:, idx]]
+
+        return self_copied
+
+
+def _refit_leaf_nodes(leaves, grad, hess, lambda_l2, num_leafs):
+    n_obs = np.zeros(num_leafs)
+    sum_gradients = np.zeros(num_leafs)
+    sum_hessians = np.full(num_leafs, lambda_l2, dtype="float")
+    values = np.zeros(num_leafs)
+
+    for leaf, g, h in zip(leaves, grad, hess):
+        n_obs[leaf] += 1
+        sum_gradients[leaf] += g
+        sum_hessians[leaf] += h
+
+    # We differ with LGBM refit here. LGBM would set the leaf value to 0 if there are no
+    # refit observations in the leaf. We do not update the leaf value in this case.
+    update = n_obs > 0
+
+    values[update] = -sum_gradients[update] / sum_hessians[update]
+
+    return update, values
