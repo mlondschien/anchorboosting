@@ -334,3 +334,74 @@ class AnchorBooster:
             return scipy.stats.norm.cdf(scores + self.init_score_)
         else:
             return scores + self.init_score_
+
+
+class AnchorBoosterForest:
+    def __init__(
+        self,
+        gamma,
+        dataset_params=None,
+        num_boost_round=100,
+        objective="regression",
+        honest_splits=False,
+        honest_splits_ratio=0.5,
+        subsample=1.0,
+        num_boosters=1,
+        **kwargs,
+    ):
+        self.gamma = gamma
+        self.params = kwargs
+        self.dataset_params = dataset_params or {}
+        self.num_boost_round = num_boost_round
+        self.booster = None
+        self.init_score_ = None
+        self.objective = objective
+        self.honest_splits = honest_splits
+        self.honest_splits_ratio = honest_splits_ratio
+        self.subsample = subsample
+        self.num_boosters = num_boosters
+
+        self.boosters = []
+
+    def fit(self, X, y, Z=None, categorical_feature=None):
+        rng = np.random.default_rng(self.params.get("random_state", 0))
+        for _ in range(self.num_boosters):
+            booster = AnchorBooster(
+                gamma=self.gamma,
+                dataset_params=self.dataset_params,
+                num_boost_round=self.num_boost_round,
+                objective=self.objective,
+                honest_splits=self.honest_splits,
+                honest_splits_ratio=self.honest_splits_ratio,
+                subsample=self.subsample,
+                **self.params,
+            )
+            mask = rng.choice(len(y), size=len(y), replace=True)
+            booster.fit(
+                X[mask], y[mask], Z=Z[mask], categorical_feature=categorical_feature
+            )
+            self.boosters.append(booster)
+
+    def predict(self, X, **kwargs):
+        """
+        Predict the outcome.
+
+        Parameters
+        ----------
+        X : numpy.ndarray, polars.DataFrame, or pyarrow.Table
+            The input data.
+        num_iteration : int
+            Number of boosting iterations to use. If -1, all are used. Else, needs to be
+            in [0, num_boost_round].
+        """
+        if self.booster is None:
+            raise ValueError("AnchorBoost has not yet been fitted.")
+
+        if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
+            X = X.to_arrow()
+
+        predictions = np.zeros((len(X), len(self.boosters)))
+        for i, booster in enumerate(self.boosters):
+            predictions[:, i] = booster.predict(X, **kwargs)
+
+        return np.mean(predictions, axis=1)
