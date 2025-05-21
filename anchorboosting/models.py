@@ -1,3 +1,5 @@
+import copy
+
 import lightgbm as lgb
 import numpy as np
 import scipy
@@ -237,8 +239,7 @@ class AnchorBooster:
                 grad = r_ + (self.gamma - 1) * r_proj * dr_
                 leaves_ = leaves[leaf_mask]
                 ddr_ = ddr[leaf_mask]
-                # if self.gamma > 1 and idx == 9:
-                #     breakpoint()
+
             else:
                 leaves_ = leaves
                 dr_ = dr
@@ -334,3 +335,106 @@ class AnchorBooster:
             return scipy.stats.norm.cdf(scores + self.init_score_)
         else:
             return scores + self.init_score_
+
+    def refit(self, X, y, decay_rate=0):
+        """
+        Refit the model using new data.
+
+        Set :math:`f^0_\\mathrm{refit} =` ``init_score_``.
+        Starting from :math:`f^j_\\mathrm{refit}`, we drop the new data :math:`(X, y)`
+        down the tree :math:`\\hat t^{j+1}`.
+        Let :math:`\\hat \\beta_\\mathrm{new}^{j+1}` be the second order optimization
+        of the loss :math:`\\ell(\\hat f^j_\\mathrm{refit} + \\hat t^{j+1}(X), y)`
+        with respect to the leaf node values :math:`\\beta^{j+1}``of
+        :math:`\\hat t^{j+1}(X)`.
+        We set
+        :math:`\\hat \\beta^{j+1}_\\mathrm{refit} = \\mathrm{decay rate} \\hat \\beta^{j+1}_\\mathrm{old} + (1 - \\mathrm{decay rate}) \\hat \\beta^{j+1}_\\mathrm{new}`.
+        Refitting updates the tree's leaf values, but not their structure.
+        ``AnchorBooster.refit`` differs from ``lgbm.Booster.refit`` in that it supports
+        probit regression and leaf nodes with no samples from the new data are not,
+        updated, instead of being shrunk towards zero (as in LightGBM).
+
+        Refit is not in-place, but returns a new instance of ``AnchorBooster``.
+
+        Parameters
+        ----------
+        X : numpy.ndarray, polars.DataFrame, or pyarrow.Table
+            The new data.
+        y : np.ndarray
+            The new outcomes.
+        decay_rate : float
+            The decay rate for the leaf values. Must be in [0, 1]. Default is 0. If 0,
+            the leaf values are set to the new values. If 1, the leaf values are not
+            updated.
+
+        Returns
+        -------
+        AnchorBooster
+            A new instance of AnchorBooster with the updated leaf values.
+        """  # noqa: E501
+        self_copied = copy.deepcopy(self)
+
+        # For some reason, the model params are not copied over.
+        # https://github.com/microsoft/LightGBM/issues/6821
+        self_copied.booster.params = self.booster.params
+
+        if self.objective == "probit" and not np.isin(y, [0, 1]).all():
+            raise ValueError("For binary classification, y values must be in {0, 1}.")
+
+        if self.objective == "probit":
+            y_tilde = np.where(y == 1, 1, -1)
+
+        leaves = self_copied.booster.predict(X, pred_leaf=True)
+        f = np.full(len(y), self.init_score_, dtype="float64")
+
+        for idx in range(self.num_boost_round):
+            if self.objective == "regression":
+                grad_hess_ones = np.empty((len(y), 3), dtype="float64")
+                grad_hess_ones[:, 0] = f - y
+                grad_hess_ones[:, 1:] = 1.0
+                # g = f - y
+                # h = 1.0
+            elif self.objective == "probit":
+                log_phi = -0.5 * f**2 - 0.5 * np.log(2 * np.pi)  # log(norm.pdf(f))
+                grad_hess_ones = np.empty((len(y), 3), dtype="float64")
+                grad_hess_ones[:, 0] = -y_tilde * np.exp(
+                    log_phi - scipy.special.log_ndtr(y_tilde * f)
+                )
+                grad_hess_ones[:, 1] = (
+                    -f * grad_hess_ones[:, 0] + grad_hess_ones[:, 0] ** 2
+                )
+                grad_hess_ones[:, 2] = 1.0
+                # g = -y_tilde * np.exp(log_phi - scipy.special.log_ndtr(y_tilde * f))
+                # h = -f * g + g**2
+            else:
+                raise ValueError("Objective must be 'regression' or 'probit'.")
+
+            num_leaves = np.max(leaves[:, idx]) + 1
+
+            # We aggregate gradients, hessians, and counts over the leaves.
+            # A bincount is faster than a for loop. Still this passes 3x through the
+            # data. We use np.add.at to do this in a single pass and avoid a copy.
+            # n_obs = np.bincount(leaves[:, idx], minlength=num_leaves)
+            # sum_grad = np.bincount(leaves[:, idx], weights=g, minlength=num_leaves)
+            # sum_hess = np.bincount(leaves[:, idx], weights=h, minlength=num_leaves)
+            arr = np.zeros((num_leaves, 3), dtype=np.float64)
+            np.add.at(arr, leaves[:, idx], grad_hess_ones)
+
+            sum_grad = arr[:, 0]
+            sum_hess = arr[:, 1]
+            n_obs = arr[:, 2]
+
+            values = -sum_grad / sum_hess * self_copied.params.get("learning_rate", 0.1)
+
+            new_values = np.zeros(num_leaves, dtype="float64")
+
+            for ldx in np.where(n_obs > 0)[0]:
+                old_value = self_copied.booster.get_leaf_output(idx, ldx)
+                new_values[ldx] = (
+                    decay_rate * old_value + (1 - decay_rate) * values[ldx]
+                )
+                self_copied.booster.set_leaf_output(idx, ldx, new_values[ldx])
+
+            f += new_values[leaves[:, idx]]
+
+        return self_copied
