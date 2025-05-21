@@ -336,24 +336,47 @@ class AnchorBooster:
         else:
             return scores + self.init_score_
 
-    def refit(self, X, y, decay_rate=0, params=None):
+    def refit(self, X, y, decay_rate=0):
         """
-        Refit the model.
+        Refit the model using new data.
+
+        Set :math:`f^0_\\mathrm{refit} =` ``init_score_``.
+        Starting from :math:`f^j_\\mathrm{refit}`, we drop the new data :math:`(X, y)`
+        down the tree :math:`\\hat t^{j+1}`.
+        Let :math:`\\hat \\beta_\\mathrm{new}^{j+1}` be the second order optimization
+        of the loss :math:`\\ell(\\hat f^j_\\mathrm{refit} + \\hat t^{j+1}(X), y)`
+        with respect to the leaf node values :math:`\\beta^{j+1}``of
+        :math:`\\hat t^{j+1}(X)`.
+        We set
+        :math:`\\hat \\beta^{j+1}_\\mathrm{refit} = \\mathrm{decay rate} \\hat \\beta^{j+1}_\\mathrm{old} + (1 - \\mathrm{decay rate}) \\hat \\beta^{j+1}_\\mathrm{new}`.
+        Refitting updates the tree's leaf values, but not their structure.
+        ``AnchorBooster.refit`` differs from ``lgbm.Booster.refit`` in that it supports
+        probit regression and leaf nodes with no samples from the new data are not,
+        updated, instead of being shrunk towards zero (as in LightGBM).
+
+        Refit is not in-place, but returns a new instance of ``AnchorBooster``.
 
         Parameters
         ----------
         X : numpy.ndarray, polars.DataFrame, or pyarrow.Table
-            The input data.
+            The new data.
         y : np.ndarray
-            The outcome.
-        Z : np.ndarray
-            Anchors.
-        """
+            The new outcomes.
+        decay_rate : float
+            The decay rate for the leaf values. Must be in [0, 1]. Default is 0. If 0,
+            the leaf values are set to the new values. If 1, the leaf values are not
+            updated.
+
+        Returns
+        -------
+        AnchorBooster
+            A new instance of AnchorBooster with the updated leaf values.
+        """  # noqa: E501
         self_copied = copy.deepcopy(self)
 
         # For some reason, the model params are not copied over.
         # https://github.com/microsoft/LightGBM/issues/6821
-        self_copied.booster.params = {**self.booster.params, **(params or {})}
+        self_copied.booster.params = self.booster.params
 
         if self.objective == "probit" and not np.isin(y, [0, 1]).all():
             raise ValueError("For binary classification, y values must be in {0, 1}.")
