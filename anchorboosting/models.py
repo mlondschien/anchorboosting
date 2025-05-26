@@ -4,13 +4,6 @@ import lightgbm as lgb
 import numpy as np
 import scipy
 
-try:
-    import polars as pl
-
-    _POLARS_INSTALLED = True
-except ImportError:
-    _POLARS_INSTALLED = False
-
 
 class AnchorBooster:
     """
@@ -83,13 +76,16 @@ class AnchorBooster:
                 f"Objective must be 'regression' or 'binary'. Got {self.objective}."
             )
 
-        if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
+        if hasattr(X, "columns"):
             feature_name = X.columns
-            X = X.to_arrow()
+            X = X.to_numpy()
         else:
             feature_name = None
 
-        self._dtype = np.result_type(Z, y)
+        self._dtype = np.float32
+
+        Z = Z.astype(self._dtype)
+        y = y.astype(self._dtype)
 
         dataset_params = {
             "data": X,
@@ -115,7 +111,11 @@ class AnchorBooster:
         if self.booster is None or self.init_score_ is None:
             raise ValueError("AnchorBoost has not yet been fitted.")
 
-        y = y.flatten()
+        if hasattr(X, "to_numpy"):
+            X = X.to_numpy()
+
+        Z = Z.astype(self._dtype)
+        y = y.astype(self._dtype).flatten()
 
         current_iteration = self.booster.current_iteration()
         if current_iteration == 0:
@@ -254,8 +254,8 @@ class AnchorBooster:
         if self.booster is None:
             raise ValueError("AnchorBoost has not yet been fitted.")
 
-        if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
-            X = X.to_arrow()
+        if hasattr(X, "to_numpy"):
+            X = X.to_numpy()
 
         scores = self.booster.predict(X, raw_score=True, **kwargs)
 
@@ -301,6 +301,9 @@ class AnchorBooster:
             A new instance of AnchorBooster with the updated leaf values.
         """  # noqa: E501
         self_copied = copy.deepcopy(self)
+
+        if hasattr(X, "to_numpy"):
+            X = X.to_numpy()
 
         # For some reason, the model params are not copied over.
         # https://github.com/microsoft/LightGBM/issues/6821

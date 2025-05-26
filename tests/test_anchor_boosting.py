@@ -32,7 +32,10 @@ def test_anchor_boosting_second_order(gamma, objective):
     f = model.predict(x, num_iteration=num_boost_round - 1, raw_score=True)
 
     leaves = model.booster.predict(
-        x, pred_leaf=True, start_iteration=num_boost_round - 1, num_iteration=1
+        x.to_arrow(),
+        pred_leaf=True,
+        start_iteration=num_boost_round - 1,
+        num_iteration=1,
     ).flatten()
 
     def regression_loss(leaf_values):
@@ -144,22 +147,32 @@ def test_compare_anchor_boosting_to_lgbm(parameters):
             "objective": "regression",
             **parameters,
         },
-        train_set=lgb.Dataset(X, y),
-        num_boost_round=10,
+        train_set=lgb.Dataset(X.to_arrow(), y, categorical_feature=["x3"]),
+        num_boost_round=50,
     )
 
     anchor_booster = AnchorBooster(
         gamma=1,
-        num_boost_round=10,
+        num_boost_round=50,
+        objective="regression",
+        learning_rate=0.1,
+        **parameters,
+    ).fit(X, y, Z=a, categorical_feature=["x3"])
+
+    anchor_booster_noncat = AnchorBooster(
+        gamma=1,
+        num_boost_round=50,
         objective="regression",
         learning_rate=0.1,
         **parameters,
     ).fit(X, y, Z=a)
 
-    lgbm_pred = lgbm_model.predict(X)
+    lgbm_pred = lgbm_model.predict(X.to_arrow())
     anchor_booster_pred = anchor_booster.predict(X)
+    anchor_booster_noncat_pred = anchor_booster_noncat.predict(X)
 
     np.testing.assert_allclose(lgbm_pred, anchor_booster_pred, rtol=1e-5)
+    assert not np.allclose(lgbm_pred, anchor_booster_noncat_pred)
 
 
 @pytest.mark.parametrize("objective", ["regression", "binary"])

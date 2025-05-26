@@ -7,11 +7,12 @@ dependencies:
   - numpy >=1.19.0
   - scipy
   - lightgbm >=4.0.0
-  - scikit-learn
-  - setuptools
-  - pytest-cov
-  - pip
-  - pytest
+  - setuptools  # build
+  - pip  # build
+  - scikit-learn  # tests
+  - pytest-cov  # tests
+  - pytest  # tests
+  - polars  # tests
   - sphinx  # docs
   - sphinxcontrib-apidoc  # docs
   - ipython  # docs
