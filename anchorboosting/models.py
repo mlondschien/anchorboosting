@@ -12,18 +12,21 @@ class AnchorBooster:
     Parameters
     ----------
     gamma: float
-        The gamma parameter for the anchor regression objective function. Must be non-
-        negative. If 1, the objective is equivalent to a standard regression objective.
+        The gamma parameter for the anchor objective function. Must be non-negative. If
+        1, the objective is equivalent to a standard regression or probit objective.
+        Larger values correspond to more causal regularization.
     dataset_params: dict or None
         The parameters for the LightGBM dataset. See LightGBM documentation for details.
+        If None, LightGBM defaults are used.
     num_boost_round: int
         The number of boosting iterations. Default is 100.
     objective: str, optional, default="regression"
-        The objective function to use. Can be "regression" or "binary" for probit
-        regression. If "binary", the outcome values must be 0 or 1.
+        The objective function to use. Can be "regression" for regression or "binary"
+        for classification with a probit link function. If "binary", the outcome values
+        must be 0 or 1.
     **kwargs: dict
         Additional parameters for the LightGBM model. See LightGBM documentation for
-        details.
+        details. Supply `learning_rate` to set the learning rate.
     """
 
     def __init__(
@@ -122,8 +125,12 @@ class AnchorBooster:
             f = np.ones(len(y), dtype=self._dtype) * self.init_score_
         else:
             f = self.booster.predict(X, raw_score=True) + self.init_score_
+            f = f.astype(self._dtype)
 
         Q, _ = np.linalg.qr(Z, mode="reduced")  # P_Z f = Q @ (Q^T @ f)
+
+        if self.objective == "binary":
+            y_tilde = np.where(y == 1, 1, -1).astype(self._dtype)
 
         for idx in range(current_iteration, current_iteration + num_iteration):
             # For regression, the loss (without anchor) is
@@ -142,7 +149,6 @@ class AnchorBooster:
                 # r = np.where(y == 1, -dp / p, dp / (1 - p))  # d/df loss(f, y)
                 # The equation for r is numerically unstable. Instead, we use
                 # scipy.special.log_ndtr, with log_ndtr(f) = log(norm.cdf(f)).
-                y_tilde = np.where(y == 1, 1, -1)
                 log_phi = -0.5 * f**2 - 0.5 * np.log(2 * np.pi)  # log(norm.pdf(f))
                 r = -y_tilde * np.exp(log_phi - scipy.special.log_ndtr(y_tilde * f))
                 dr = -f * r + r**2  # d^2/df^2 loss(f, y)
