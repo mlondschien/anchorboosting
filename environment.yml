@@ -4,11 +4,19 @@ channels:
   - nodefaults
 dependencies:
   - python >=3.9
-  - pytest
   - numpy >=1.19.0
   - scipy
   - lightgbm >=4.0.0
-  - pip
+  - scikit-learn
   - setuptools
   - pytest-cov
-  - scikit-learn
+  - pip
+  - pytest
+  - sphinx  # docs
+  - sphinxcontrib-apidoc  # docs
+  - ipython  # docs
+  - sphinx_rtd_theme  # docs
+  - sphinxcontrib-bibtex  # docs
+  - pip  # docs
+  - nbclassic  # docs
+  - nbsphinx  # docs
