@@ -26,7 +26,8 @@ class AnchorBooster:
     num_boost_round: int
         The number of boosting iterations. Default is 100.
     objective: str, optional, default="regression"
-        The objective function to use. Can be "regression", "logistic", or "probit".
+        The objective function to use. Can be "regression" or "binary" for probit
+        regression. If "binary", the outcome values must be 0 or 1.
     **kwargs: dict
         Additional parameters for the LightGBM model. See LightGBM documentation for
         details.
@@ -75,10 +76,12 @@ class AnchorBooster:
 
         if self.objective == "regression":
             self.init_score_ = np.mean(y)
-        elif self.objective == "probit":
+        elif self.objective == "binary":
             self.init_score_ = scipy.stats.norm.ppf(np.mean(y))
         else:
-            self.init_score_ = np.log(np.mean(y) / (1 - np.mean(y)))
+            raise ValueError(
+                f"Objective must be 'regression' or 'binary'. Got {self.objective}."
+            )
 
         if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
             feature_name = X.columns
@@ -114,17 +117,10 @@ class AnchorBooster:
                 r = f - y  # d/df loss(f, y)
                 dr = np.ones(len(y), dtype=dtype)  # d^2/df^2 loss(f, y)
                 ddr = np.zeros(len(y), dtype=dtype)  # d^3/df^3 loss(f, y)
-            # For logistic regression, the loss (without anchor) is
-            # loss(f, y) = - sum_i (y_i log(p_i) + (1 - y_i) log(1 - p_i))
-            elif self.objective == "logistic":
-                p = scipy.special.expit(f)
-                r = p - y  # score residuals: r(f, y) = d/df loss(f, y)
-                dr = p * (1 - p)  # d/df r(f, y) = d^2/df^2 loss(f, y)
-                ddr = p * (1 - p) * (1 - 2 * p)  # d^3/df^3 loss(f, y)
             # For probit regression, the loss (without anchor) is
             # loss(f, y) = - sum_i (y_i log(p_i) + (1 - y_i) log(1 - p_i))
             # where p_i = scipy.stats.cdf(f_i)
-            elif self.objective == "probit":
+            else:
                 # We wish to compute the following:
                 # p = scipy.stats.norm.cdf(f)
                 # dp = scipy.stats.norm.pdf(f)  # d/df p(f)
@@ -136,11 +132,6 @@ class AnchorBooster:
                 r = -y_tilde * np.exp(log_phi - scipy.special.log_ndtr(y_tilde * f))
                 dr = -f * r + r**2  # d^2/df^2 loss(f, y)
                 ddr = (f**2 - 1) * r - 3 * f * r**2 + 2 * r**3  # d^3/df^3 loss
-            else:
-                raise ValueError(
-                    "Objective must be one of 'regression', 'logistic', or 'probit'. "
-                    f" Got {self.objective}."
-                )
 
             r_proj = Q @ (Q.T @ r)
             grad = r + (self.gamma - 1) * r_proj * dr
@@ -253,9 +244,7 @@ class AnchorBooster:
 
         scores = self.booster.predict(X, raw_score=True, **kwargs)
 
-        if self.objective == "logistic" and not raw_score:
-            return scipy.special.expit(scores + self.init_score_)
-        elif self.objective == "probit" and not raw_score:
+        if self.objective == "binary" and not raw_score:
             return scipy.stats.norm.cdf(scores + self.init_score_)
         else:
             return scores + self.init_score_
@@ -302,10 +291,10 @@ class AnchorBooster:
         # https://github.com/microsoft/LightGBM/issues/6821
         self_copied.booster.params = self.booster.params
 
-        if self.objective == "probit" and not np.isin(y, [0, 1]).all():
+        if self.objective == "binary" and not np.isin(y, [0, 1]).all():
             raise ValueError("For binary classification, y values must be in {0, 1}.")
 
-        if self.objective == "probit":
+        if self.objective == "binary":
             y_tilde = np.where(y == 1, 1, -1)
 
         leaves = self_copied.booster.predict(X, pred_leaf=True)
@@ -318,7 +307,7 @@ class AnchorBooster:
                 grad_hess_ones[:, 1:] = 1.0
                 # g = f - y
                 # h = 1.0
-            elif self.objective == "probit":
+            elif self.objective == "binary":
                 log_phi = -0.5 * f**2 - 0.5 * np.log(2 * np.pi)  # log(norm.pdf(f))
                 grad_hess_ones = np.empty((len(y), 3), dtype="float64")
                 grad_hess_ones[:, 0] = -y_tilde * np.exp(
@@ -331,7 +320,7 @@ class AnchorBooster:
                 # g = -y_tilde * np.exp(log_phi - scipy.special.log_ndtr(y_tilde * f))
                 # h = -f * g + g**2
             else:
-                raise ValueError("Objective must be 'regression' or 'probit'.")
+                raise ValueError("Objective must be 'regression' or 'binary'.")
 
             num_leaves = np.max(leaves[:, idx]) + 1
 

@@ -8,7 +8,7 @@ from anchorboosting.simulate import f1, simulate
 
 
 @pytest.mark.parametrize("gamma", [1.0, 2.0, 100])
-@pytest.mark.parametrize("objective", ["regression", "logistic", "probit"])
+@pytest.mark.parametrize("objective", ["regression", "binary"])
 def test_anchor_boosting_second_order(gamma, objective):
     learning_rate = 0.1
     num_leaves = 5
@@ -17,7 +17,7 @@ def test_anchor_boosting_second_order(gamma, objective):
 
     x, y, a = simulate(f1, n=n, shift=0, seed=0)
 
-    if objective in ["logistic", "probit"]:
+    if objective == "binary":
         y = (y > 0).astype(int)
 
     model = AnchorBooster(
@@ -40,16 +40,6 @@ def test_anchor_boosting_second_order(gamma, objective):
         Pa_residuals = a @ np.linalg.solve(a.T @ a, a.T @ residuals)
         return np.sum(np.square(residuals)) + (gamma - 1) * residuals.T @ Pa_residuals
 
-    def classification_loss(leaf_values):
-        scores = f + leaf_values[leaves]
-        p = 1 / (1 + np.exp(-scores))
-        residuals = y - p
-        Pa_residuals = a @ np.linalg.solve(a.T @ a, a.T @ residuals)
-        return (
-            np.sum(-np.log(np.where(y == 1, p, 1 - p)))
-            + (gamma - 1) / 2 * residuals.T @ Pa_residuals
-        )
-
     def probit_loss(leaf_values):
         scores = f + leaf_values[leaves]
         p = scipy.stats.norm.cdf(scores)
@@ -61,10 +51,8 @@ def test_anchor_boosting_second_order(gamma, objective):
 
     if objective == "regression":
         loss = regression_loss
-    elif objective == "probit":
-        loss = probit_loss
     else:
-        loss = classification_loss
+        loss = probit_loss
 
     def vectorize(f):
         def f_(x):
@@ -90,13 +78,13 @@ def test_anchor_boosting_second_order(gamma, objective):
 
 
 @pytest.mark.parametrize("gamma", [1, 10])
-@pytest.mark.parametrize("objective", ["logistic", "regression", "probit"])
+@pytest.mark.parametrize("objective", ["binary", "regression"])
 def test_anchor_boosting_decreases_loss(gamma, objective):
     num_leaves = 5
     n = 1000
 
     x, y, a = simulate(f1, n=n, shift=0, seed=0)
-    if objective in ["logistic", "probit"]:
+    if objective == "binary":
         y = (y > 0).astype(int)
 
     model = AnchorBooster(
@@ -112,14 +100,6 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
         Pa_residuals = a @ np.linalg.solve(a.T @ a, a.T @ residuals)
         return np.sum(np.square(residuals) + (gamma - 1) * np.square(Pa_residuals))
 
-    def classification_loss(y, f, a):
-        p = 1 / (1 + np.exp(-f))
-        residuals = y - p
-        Pa_residuals = a @ np.linalg.solve(a.T @ a, a.T @ residuals)
-        return np.mean(
-            -np.log(np.where(y == 1, p, 1 - p)) + (gamma - 1) * np.square(Pa_residuals)
-        )
-
     def probit_loss(y, f, a):
         p = scipy.stats.norm.cdf(f)
         dp = scipy.stats.norm.pdf(f)
@@ -131,10 +111,8 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
 
     if objective == "regression":
         loss = regression_loss
-    elif objective == "probit":
-        loss = probit_loss
     else:
-        loss = classification_loss
+        loss = probit_loss
 
     loss_value = np.inf
     for idx in range(10):
@@ -147,7 +125,6 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
         loss_value = new_loss_value
 
 
-@pytest.mark.parametrize("objective", ["regression", "logistic"])
 @pytest.mark.parametrize(
     "parameters",
     [
@@ -158,16 +135,13 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
         {"lambda_l2": 0.1},
     ],
 )
-def test_compare_anchor_boosting_to_lgbm(objective, parameters):
+def test_compare_anchor_boosting_to_lgbm(parameters):
     X, y, a = simulate(f1, shift=0, seed=0)
-
-    if objective == "logistic":
-        y = (y > 0).astype(int)
 
     lgbm_model = lgb.train(
         params={
             "learning_rate": 0.1,
-            "objective": "binary" if objective == "logistic" else objective,
+            "objective": "regression",
             **parameters,
         },
         train_set=lgb.Dataset(X, y),
@@ -177,7 +151,7 @@ def test_compare_anchor_boosting_to_lgbm(objective, parameters):
     anchor_booster = AnchorBooster(
         gamma=1,
         num_boost_round=10,
-        objective=objective,
+        objective="regression",
         learning_rate=0.1,
         **parameters,
     ).fit(X, y, Z=a)
@@ -188,11 +162,11 @@ def test_compare_anchor_boosting_to_lgbm(objective, parameters):
     np.testing.assert_allclose(lgbm_pred, anchor_booster_pred, rtol=1e-5)
 
 
-@pytest.mark.parametrize("objective", ["regression", "logistic", "probit"])
+@pytest.mark.parametrize("objective", ["regression", "binary"])
 def test_anchor_booster_init_score(objective):
     X, y, a = simulate(f1, shift=0, seed=0)
 
-    if objective in ["logistic", "probit"]:
+    if objective == "binary":
         y = (y > 0).astype(int)
 
     anchor_booster = AnchorBooster(
