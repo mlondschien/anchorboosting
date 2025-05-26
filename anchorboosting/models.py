@@ -14,7 +14,7 @@ except ImportError:
 
 class AnchorBooster:
     """
-    Boost the anchor regression loss.
+    Boost the anchor loss.
 
     Parameters
     ----------
@@ -27,16 +27,6 @@ class AnchorBooster:
         The number of boosting iterations. Default is 100.
     objective: str, optional, default="regression"
         The objective function to use. Can be "regression", "logistic", or "probit".
-    honest_splits: bool, optional, default=False
-        If True, uses a different part of the training data to compute tree splits and
-        leaf values.
-    honest_splits_ratio: float, optional, default=0.5
-        Proportion of the training data to use to compute tree splits when honest_splits
-        is True. Must be in (0, 1).
-    subsample: float, optional, default=1.0
-        The fraction of samples to use for each boosting iteration. Must be in (0, 1].
-        Acts multiplicatively with ``honest_splits_ratio``. Not supported when
-        ``honest_splits`` is False.
     **kwargs: dict
         Additional parameters for the LightGBM model. See LightGBM documentation for
         details.
@@ -48,9 +38,6 @@ class AnchorBooster:
         dataset_params=None,
         num_boost_round=100,
         objective="regression",
-        honest_splits=False,
-        honest_splits_ratio=0.5,
-        subsample=1.0,
         **kwargs,
     ):
         self.gamma = gamma
@@ -60,9 +47,6 @@ class AnchorBooster:
         self.booster = None
         self.init_score_ = None
         self.objective = objective
-        self.honest_splits = honest_splits
-        self.honest_splits_ratio = honest_splits_ratio
-        self.subsample = subsample
 
     def fit(
         self,
@@ -86,13 +70,8 @@ class AnchorBooster:
             List of categorical feature names or indices. If None, all features are
             assumed to be numerical.
         """
-        if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
-            feature_name = X.columns
-            X = X.to_arrow()
-        else:
-            feature_name = None
-
-        dtype = np.result_type(Z, y)
+        if self.objective != "regression" and not np.isin(y, [0, 1]).all():
+            raise ValueError("For binary classification, y values must be in {0, 1}.")
 
         if self.objective == "regression":
             self.init_score_ = np.mean(y)
@@ -101,16 +80,13 @@ class AnchorBooster:
         else:
             self.init_score_ = np.log(np.mean(y) / (1 - np.mean(y)))
 
-        if self.objective != "regression" and not np.isin(y, [0, 1]).all():
-            raise ValueError("For binary classification, y values must be in {0, 1}.")
+        if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
+            feature_name = X.columns
+            X = X.to_arrow()
+        else:
+            feature_name = None
 
-        if self.subsample != 1 and not self.honest_splits:
-            raise ValueError(
-                "Subsampling is not supported when honest_splits is False. "
-                "Set honest_splits=True to use subsampling."
-            )
-
-        y = y.flatten()
+        dtype = np.result_type(Z, y)
 
         dataset_params = {
             "data": X,
@@ -124,25 +100,14 @@ class AnchorBooster:
         data = lgb.Dataset(**dataset_params)
 
         self.booster = lgb.Booster(params=self.params, train_set=data)
+
+        y = y.flatten()
+
         f = dataset_params["init_score"]  # scores
 
         Q, _ = np.linalg.qr(Z, mode="reduced")  # P_Z f = Q @ (Q^T @ f)
 
-        if self.honest_splits:
-            n_split = int(len(y) * self.honest_splits_ratio * self.subsample)
-
-            split_mask = np.zeros(len(y), dtype=bool)
-            split_mask[:n_split] = True
-            leaf_mask = np.zeros(len(y), dtype=bool)
-            leaf_mask[n_split : int(len(y) * self.subsample)] = True
-            rng = np.random.default_rng(self.params.get("random_state", 0))
-
         for idx in range(self.num_boost_round):
-            if self.honest_splits:
-                perm = rng.permutation(len(y))
-                split_mask = split_mask[perm]
-                leaf_mask = leaf_mask[perm]
-
             # For regression, the loss (without anchor) is
             # loss(f, y) = 0.5 * || y - f ||^2
             if self.objective == "regression":
@@ -177,24 +142,8 @@ class AnchorBooster:
                     f" Got {self.objective}."
                 )
 
-            if self.honest_splits:
-                Q_ = Q[split_mask, :]
-                r_ = r[split_mask]
-                dr_ = dr[split_mask]
-                # Q_ @ (Q_.T @ r_) is Z[mask, :] @ (Z.T @ Z) @ (Z[mask, :]^T @ r_)
-                # That is, we use the full Z matrix to compute its covariance. However,
-                # different number of samples are used, so we need to rescale.
-                r_proj = Q_ @ (Q_.T @ r_) / (self.honest_splits_ratio * self.subsample)
-
-                grad = np.zeros(len(y), dtype=dtype)
-                grad[split_mask] = r_ + (self.gamma - 1) * r_proj * dr_
-                hess = np.zeros(len(y), dtype=dtype)
-                hess[split_mask] = dr_
-
-            else:
-                r_proj = Q @ (Q.T @ r)
-                grad = r + (self.gamma - 1) * r_proj * dr
-                hess = dr
+            r_proj = Q @ (Q.T @ r)
+            grad = r + (self.gamma - 1) * r_proj * dr
 
             # We wish to fit one additional tree. Intuitively, one would use
             # is_finished = self.booster.update(fobj=self.objective.objective)
@@ -216,7 +165,7 @@ class AnchorBooster:
             # criteria. c.f. https://github.com/microsoft/LightGBM/pull/6890
             # The hessian is used only for the `min_hessian_in_leaf` parameter to
             # avoid numerical instabilities.
-            is_finished = self.booster._Booster__boost(grad, hess)
+            is_finished = self.booster._Booster__boost(grad, dr)
 
             if is_finished:
                 print(f"Finished training after {idx} iterations.")
@@ -226,25 +175,6 @@ class AnchorBooster:
                 X, start_iteration=idx, num_iteration=1, pred_leaf=True
             ).flatten()
             num_leaves = np.max(leaves) + 1
-
-            if self.honest_splits:
-                r_ = r[leaf_mask]
-                dr_ = dr[leaf_mask]
-                Q_ = Q[leaf_mask, :]
-                # Q_ @ (Q_.T @ r_) is Z[mask, :] @ (Z.T @ Z) @ (Z[mask, :]^T @ r_)
-                # That is, we use the full Z matrix to compute its covariance. However,
-                # different number of samples are used, so we need to rescale.
-                r_proj = Q_ @ (Q_.T @ r_)
-                r_proj /= (1 - self.honest_splits_ratio) * self.subsample
-                grad = r_ + (self.gamma - 1) * r_proj * dr_
-                leaves_ = leaves[leaf_mask]
-                ddr_ = ddr[leaf_mask]
-
-            else:
-                leaves_ = leaves
-                dr_ = dr
-                ddr_ = ddr
-                Q_ = Q
 
             # We wish to do 2nd order updates in the leaves. Since the anchor regression
             # objective is quadratic, for regression a 2nd order update is equal to the
@@ -265,35 +195,29 @@ class AnchorBooster:
             # beta = - (M^T [d^2/df^2 L] M)^{-1} M^T [d/df L]
 
             # M^T x = bincount(leaves_masked, weights=x)
-            g = np.bincount(leaves_, weights=grad, minlength=num_leaves)
+            g = np.bincount(leaves, weights=grad, minlength=num_leaves)
 
             # M^T diag(x) M = diag(np.bincount(leaves, weights=x))
             counts = np.bincount(
-                leaves_,
-                weights=dr_ + (self.gamma - 1) * r_proj * ddr_,
+                leaves,
+                weights=dr + (self.gamma - 1) * r_proj * ddr,
                 minlength=num_leaves,
             )
             counts += self.params.get("lambda_l2", 0)
-
-            # If honest_splits is True, it can occur that some leaves have no "leaf"
-            # samples. We make the hessian invertible.
-            counts[counts == 0] = 1
 
             # Mdr^T P_Z Mdr = (Mdr^T Q) @ (Mdr^T Q)^T
             # One could also compute this using bincount, but it appears this
             # version using a sparse matrix is faster.
             Mdr = scipy.sparse.csr_matrix(
                 (
-                    dr_,
-                    (np.arange(len(leaves_)), leaves_),
+                    dr,
+                    (np.arange(len(leaves)), leaves),
                 ),
-                shape=(len(leaves_), num_leaves),
+                shape=(len(leaves), num_leaves),
                 dtype=dtype,
             )
-            B = Mdr.T.dot(Q_)
+            B = Mdr.T.dot(Q)
             H = (self.gamma - 1) * B @ B.T
-            if self.honest_splits:
-                H /= (1 - self.honest_splits_ratio) * self.subsample
             H += np.diag(counts)
 
             # Compute the 2nd order update
