@@ -85,17 +85,12 @@ class AnchorBooster:
         else:
             feature_name = None
 
-        self._dtype = np.float32
-
-        Z = Z.astype(self._dtype)
-        y = y.astype(self._dtype)
-
         dataset_params = {
             "data": X,
             "label": y,
             "categorical_feature": categorical_feature,
             "feature_name": feature_name,
-            "init_score": np.ones(len(y), dtype=self._dtype) * self.init_score_,
+            "init_score": np.ones(len(y), dtype=np.float64) * self.init_score_,
             **self.dataset_params,
         }
 
@@ -117,28 +112,27 @@ class AnchorBooster:
         if hasattr(X, "to_numpy"):
             X = X.to_numpy()
 
-        Z = Z.astype(self._dtype)
-        y = y.astype(self._dtype).flatten()
+        y = y.flatten()
 
         current_iteration = self.booster.current_iteration()
         if current_iteration == 0:
-            f = np.ones(len(y), dtype=self._dtype) * self.init_score_
+            f = np.ones(len(y), dtype=np.float64) * self.init_score_
         else:
             f = self.booster.predict(X, raw_score=True) + self.init_score_
-            f = f.astype(self._dtype)
+            f = f.astype(np.float64)
 
         Q, _ = np.linalg.qr(Z, mode="reduced")  # P_Z f = Q @ (Q^T @ f)
 
         if self.objective == "binary":
-            y_tilde = np.where(y == 1, 1, -1).astype(self._dtype)
+            y_tilde = np.where(y == 1, 1, -1).astype(np.float64)
 
         for idx in range(current_iteration, current_iteration + num_iteration):
             # For regression, the loss (without anchor) is
             # loss(f, y) = 0.5 * || y - f ||^2
             if self.objective == "regression":
                 r = f - y  # d/df loss(f, y)
-                dr = np.ones(len(y), dtype=self._dtype)  # d^2/df^2 loss(f, y)
-                ddr = np.zeros(len(y), dtype=self._dtype)  # d^3/df^3 loss(f, y)
+                dr = np.ones(len(y), dtype=np.float64)  # d^2/df^2 loss(f, y)
+                ddr = np.zeros(len(y), dtype=np.float64)  # d^3/df^3 loss(f, y)
             # For probit regression, the loss (without anchor) is
             # loss(f, y) = - sum_i (y_i log(p_i) + (1 - y_i) log(1 - p_i))
             # where p_i = scipy.stats.cdf(f_i)
@@ -226,7 +220,7 @@ class AnchorBooster:
                     (np.arange(len(leaves)), leaves),
                 ),
                 shape=(len(leaves), num_leaves),
-                dtype=self._dtype,
+                dtype=np.float64,
             )
             B = Mdr.T.dot(Q)
             H = (self.gamma - 1) * B @ B.T
