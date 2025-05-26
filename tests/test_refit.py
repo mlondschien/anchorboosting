@@ -5,14 +5,14 @@ from anchorboosting.models import AnchorBooster
 from anchorboosting.simulate import f1, simulate
 
 
-@pytest.mark.parametrize("objective", ["regression", "probit"])
+@pytest.mark.parametrize("objective", ["regression", "binary"])
 def test_compare_refit_to_lgbm(objective):
 
     X, y, a = simulate(f1, shift=0, seed=0)
-    if objective == "probit":
+
+    if objective == "binary":
         y = (y > 0).astype(int)
-    else:
-        y = y - y.mean()
+
     anchor_booster = AnchorBooster(
         objective=objective,
         gamma=1,

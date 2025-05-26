@@ -1,5 +1,3 @@
-from functools import partial
-
 import lightgbm as lgb
 import numpy as np
 import pytest
@@ -9,19 +7,17 @@ from anchorboosting import AnchorBooster
 from anchorboosting.simulate import f1, simulate
 
 
-@pytest.mark.parametrize("honest_splits", [True, False])
 @pytest.mark.parametrize("gamma", [1.0, 2.0, 100])
-@pytest.mark.parametrize("objective", ["regression", "logistic", "probit"])
-def test_anchor_boosting_second_order(gamma, objective, honest_splits):
+@pytest.mark.parametrize("objective", ["regression", "binary"])
+def test_anchor_boosting_second_order(gamma, objective):
     learning_rate = 0.1
     num_leaves = 5
     n = 200
     num_boost_round = 10
-    honest_splits_ratio = 0.3
 
     x, y, a = simulate(f1, n=n, shift=0, seed=0)
 
-    if objective in ["logistic", "probit"]:
+    if objective == "binary":
         y = (y > 0).astype(int)
 
     model = AnchorBooster(
@@ -30,18 +26,8 @@ def test_anchor_boosting_second_order(gamma, objective, honest_splits):
         num_leaves=num_leaves,
         objective=objective,
         learning_rate=learning_rate,
-        honest_splits=honest_splits,
-        honest_splits_ratio=honest_splits_ratio,
     )
     model.fit(x, y, Z=a)
-
-    mask = np.ones(n, dtype=bool)
-    if honest_splits:
-        rng = np.random.default_rng(0)
-        mask[: int(n * honest_splits_ratio)] = False
-        for i in range(num_boost_round):
-            perm = rng.permutation(n)
-            mask = mask[perm]
 
     f = model.predict(x, num_iteration=num_boost_round - 1, raw_score=True)
 
@@ -49,40 +35,24 @@ def test_anchor_boosting_second_order(gamma, objective, honest_splits):
         x, pred_leaf=True, start_iteration=num_boost_round - 1, num_iteration=1
     ).flatten()
 
-    def regression_loss(leaf_values, mask):
-        residuals = y[mask] - f[mask] - leaf_values[leaves[mask]]
-        Pa_residuals = a[mask, :] @ np.linalg.solve(a.T @ a, a[mask, :].T @ residuals)
-        Pa_residuals /= mask.mean()
+    def regression_loss(leaf_values):
+        residuals = y - f - leaf_values[leaves]
+        Pa_residuals = a @ np.linalg.solve(a.T @ a, a.T @ residuals)
         return np.sum(np.square(residuals)) + (gamma - 1) * residuals.T @ Pa_residuals
 
-    def classification_loss(leaf_values, mask):
-        scores = f[mask] + leaf_values[leaves[mask]]
-        p = 1 / (1 + np.exp(-scores))
-        residuals = y[mask] - p
-        Pa_residuals = a[mask, :] @ np.linalg.solve(a.T @ a, a[mask, :].T @ residuals)
-        Pa_residuals /= mask.mean()
-        return (
-            np.sum(-np.log(np.where(y[mask] == 1, p, 1 - p)))
-            + (gamma - 1) / 2 * residuals.T @ Pa_residuals
-        )
-
-    def probit_loss(leaf_values, mask):
-        scores = f[mask] + leaf_values[leaves[mask]]
+    def probit_loss(leaf_values):
+        scores = f + leaf_values[leaves]
         p = scipy.stats.norm.cdf(scores)
         dp = scipy.stats.norm.pdf(scores)
-        losses = -np.log(np.where(y[mask] == 1, p, 1 - p))
-        dl = np.where(y[mask] == 1, -dp / p, dp / (1 - p))
-
-        Pa_dl = a[mask, :] @ np.linalg.solve(a.T @ a, a[mask, :].T @ dl)
-        Pa_dl /= mask.mean()
+        losses = -np.log(np.where(y == 1, p, 1 - p))
+        dl = np.where(y == 1, -dp / p, dp / (1 - p))
+        Pa_dl = a @ np.linalg.solve(a.T @ a, a.T @ dl)
         return np.sum(losses) + (gamma - 1) / 2 * dl.T @ Pa_dl
 
     if objective == "regression":
-        loss = partial(regression_loss, mask=mask)
-    elif objective == "probit":
-        loss = partial(probit_loss, mask=mask)
+        loss = regression_loss
     else:
-        loss = partial(classification_loss, mask=mask)
+        loss = probit_loss
 
     def vectorize(f):
         def f_(x):
@@ -108,13 +78,13 @@ def test_anchor_boosting_second_order(gamma, objective, honest_splits):
 
 
 @pytest.mark.parametrize("gamma", [1, 10])
-@pytest.mark.parametrize("objective", ["logistic", "regression", "probit"])
+@pytest.mark.parametrize("objective", ["binary", "regression"])
 def test_anchor_boosting_decreases_loss(gamma, objective):
     num_leaves = 5
     n = 1000
 
     x, y, a = simulate(f1, n=n, shift=0, seed=0)
-    if objective in ["logistic", "probit"]:
+    if objective == "binary":
         y = (y > 0).astype(int)
 
     model = AnchorBooster(
@@ -122,7 +92,6 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
         num_boost_round=10,
         num_leaves=num_leaves,
         objective=objective,
-        honest_splits=False,
     )
     model.fit(x, y, Z=a)
 
@@ -130,14 +99,6 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
         residuals = y - f
         Pa_residuals = a @ np.linalg.solve(a.T @ a, a.T @ residuals)
         return np.sum(np.square(residuals) + (gamma - 1) * np.square(Pa_residuals))
-
-    def classification_loss(y, f, a):
-        p = 1 / (1 + np.exp(-f))
-        residuals = y - p
-        Pa_residuals = a @ np.linalg.solve(a.T @ a, a.T @ residuals)
-        return np.mean(
-            -np.log(np.where(y == 1, p, 1 - p)) + (gamma - 1) * np.square(Pa_residuals)
-        )
 
     def probit_loss(y, f, a):
         p = scipy.stats.norm.cdf(f)
@@ -150,10 +111,8 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
 
     if objective == "regression":
         loss = regression_loss
-    elif objective == "probit":
-        loss = probit_loss
     else:
-        loss = classification_loss
+        loss = probit_loss
 
     loss_value = np.inf
     for idx in range(10):
@@ -166,7 +125,6 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
         loss_value = new_loss_value
 
 
-@pytest.mark.parametrize("objective", ["regression", "logistic"])
 @pytest.mark.parametrize(
     "parameters",
     [
@@ -177,16 +135,13 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
         {"lambda_l2": 0.1},
     ],
 )
-def test_compare_anchor_boosting_to_lgbm(objective, parameters):
+def test_compare_anchor_boosting_to_lgbm(parameters):
     X, y, a = simulate(f1, shift=0, seed=0)
-
-    if objective == "logistic":
-        y = (y > 0).astype(int)
 
     lgbm_model = lgb.train(
         params={
             "learning_rate": 0.1,
-            "objective": "binary" if objective == "logistic" else objective,
+            "objective": "regression",
             **parameters,
         },
         train_set=lgb.Dataset(X, y),
@@ -196,7 +151,7 @@ def test_compare_anchor_boosting_to_lgbm(objective, parameters):
     anchor_booster = AnchorBooster(
         gamma=1,
         num_boost_round=10,
-        objective=objective,
+        objective="regression",
         learning_rate=0.1,
         **parameters,
     ).fit(X, y, Z=a)
@@ -207,11 +162,11 @@ def test_compare_anchor_boosting_to_lgbm(objective, parameters):
     np.testing.assert_allclose(lgbm_pred, anchor_booster_pred, rtol=1e-5)
 
 
-@pytest.mark.parametrize("objective", ["regression", "logistic", "probit"])
+@pytest.mark.parametrize("objective", ["regression", "binary"])
 def test_anchor_booster_init_score(objective):
     X, y, a = simulate(f1, shift=0, seed=0)
 
-    if objective in ["logistic", "probit"]:
+    if objective == "binary":
         y = (y > 0).astype(int)
 
     anchor_booster = AnchorBooster(
