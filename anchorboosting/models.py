@@ -73,7 +73,8 @@ class AnchorBooster:
         if self.objective == "regression":
             self.init_score_ = np.mean(y)
         elif self.objective == "binary":
-            self.init_score_ = scipy.stats.norm.ppf(np.mean(y))
+            y_mean = np.clip(np.mean(y), 1 / len(y), 1 - 1 / len(y))
+            self.init_score_ = scipy.stats.norm.ppf(y_mean)
         else:
             raise ValueError(
                 f"Objective must be 'regression' or 'binary'. Got {self.objective}."
@@ -81,9 +82,11 @@ class AnchorBooster:
 
         if hasattr(X, "columns"):
             feature_name = X.columns
-            X = X.to_numpy()
         else:
             feature_name = None
+
+        if hasattr(X, "to_numpy"):
+            X = X.to_numpy()
 
         dataset_params = {
             "data": X,
