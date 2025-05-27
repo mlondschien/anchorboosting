@@ -4,7 +4,6 @@ import lightgbm as lgb
 import numpy as np
 import scipy
 
-
 class AnchorBooster:
     """
     Boost the anchor loss.
@@ -200,7 +199,7 @@ class AnchorBooster:
             # We do the 2nd order update
             # beta = - (M^T [d^2/df^2 L] M)^{-1} M^T [d/df L]
 
-            # M^T x = bincount(leaves_masked, weights=x)
+            # M^T x = bincount(leaves, weights=x)
             g = np.bincount(leaves, weights=grad, minlength=num_leaves)
 
             # M^T diag(x) M = diag(np.bincount(leaves, weights=x))
@@ -210,7 +209,7 @@ class AnchorBooster:
                 minlength=num_leaves,
             )
             counts += self.params.get("lambda_l2", 0)
-
+            counts[counts == 0] = 1
             # Mdr^T P_Z Mdr = (Mdr^T Q) @ (Mdr^T Q)^T
             # One could also compute this using bincount, but it appears this
             # version using a sparse matrix is faster.
