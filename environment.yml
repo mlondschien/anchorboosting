@@ -13,6 +13,7 @@ dependencies:
   - pytest-cov  # tests
   - pytest  # tests
   - polars  # tests
+  - pyarrow  # tests
   - sphinx  # docs
   - sphinxcontrib-apidoc  # docs
   - ipython  # docs
