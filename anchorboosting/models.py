@@ -4,13 +4,6 @@ import lightgbm as lgb
 import numpy as np
 import scipy
 
-try:
-    import polars as pl
-
-    _POLARS_INSTALLED = True
-except ImportError:
-    _POLARS_INSTALLED = False
-
 
 class AnchorBooster:
     """
@@ -19,18 +12,21 @@ class AnchorBooster:
     Parameters
     ----------
     gamma: float
-        The gamma parameter for the anchor regression objective function. Must be non-
-        negative. If 1, the objective is equivalent to a standard regression objective.
+        The gamma parameter for the anchor objective function. Must be non-negative. If
+        1, the objective is equivalent to a standard regression or probit objective.
+        Larger values correspond to more causal regularization.
     dataset_params: dict or None
         The parameters for the LightGBM dataset. See LightGBM documentation for details.
+        If None, LightGBM defaults are used.
     num_boost_round: int
         The number of boosting iterations. Default is 100.
     objective: str, optional, default="regression"
-        The objective function to use. Can be "regression" or "binary" for probit
-        regression. If "binary", the outcome values must be 0 or 1.
+        The objective function to use. Can be "regression" for regression or "binary"
+        for classification with a probit link function. If "binary", the outcome values
+        must be 0 or 1.
     **kwargs: dict
         Additional parameters for the LightGBM model. See LightGBM documentation for
-        details.
+        details. Supply `learning_rate` to set the learning rate.
     """
 
     def __init__(
@@ -77,26 +73,27 @@ class AnchorBooster:
         if self.objective == "regression":
             self.init_score_ = np.mean(y)
         elif self.objective == "binary":
-            self.init_score_ = scipy.stats.norm.ppf(np.mean(y))
+            y_mean = np.clip(np.mean(y), 1 / len(y), 1 - 1 / len(y))
+            self.init_score_ = scipy.stats.norm.ppf(y_mean)
         else:
             raise ValueError(
                 f"Objective must be 'regression' or 'binary'. Got {self.objective}."
             )
 
-        if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
+        if hasattr(X, "columns"):
             feature_name = X.columns
-            X = X.to_arrow()
         else:
             feature_name = None
 
-        self._dtype = np.result_type(Z, y)
+        if hasattr(X, "to_numpy"):
+            X = X.to_numpy()
 
         dataset_params = {
             "data": X,
             "label": y,
             "categorical_feature": categorical_feature,
             "feature_name": feature_name,
-            "init_score": np.ones(len(y), dtype=self._dtype) * self.init_score_,
+            "init_score": np.ones(len(y), dtype=np.float64) * self.init_score_,
             **self.dataset_params,
         }
 
@@ -115,23 +112,30 @@ class AnchorBooster:
         if self.booster is None or self.init_score_ is None:
             raise ValueError("AnchorBoost has not yet been fitted.")
 
+        if hasattr(X, "to_numpy"):
+            X = X.to_numpy()
+
         y = y.flatten()
 
         current_iteration = self.booster.current_iteration()
         if current_iteration == 0:
-            f = np.ones(len(y), dtype=self._dtype) * self.init_score_
+            f = np.ones(len(y), dtype=np.float64) * self.init_score_
         else:
             f = self.booster.predict(X, raw_score=True) + self.init_score_
+            f = f.astype(np.float64)
 
         Q, _ = np.linalg.qr(Z, mode="reduced")  # P_Z f = Q @ (Q^T @ f)
+
+        if self.objective == "binary":
+            y_tilde = np.where(y == 1, 1, -1).astype(np.float64)
 
         for idx in range(current_iteration, current_iteration + num_iteration):
             # For regression, the loss (without anchor) is
             # loss(f, y) = 0.5 * || y - f ||^2
             if self.objective == "regression":
                 r = f - y  # d/df loss(f, y)
-                dr = np.ones(len(y), dtype=self._dtype)  # d^2/df^2 loss(f, y)
-                ddr = np.zeros(len(y), dtype=self._dtype)  # d^3/df^3 loss(f, y)
+                dr = np.ones(len(y), dtype=np.float64)  # d^2/df^2 loss(f, y)
+                ddr = np.zeros(len(y), dtype=np.float64)  # d^3/df^3 loss(f, y)
             # For probit regression, the loss (without anchor) is
             # loss(f, y) = - sum_i (y_i log(p_i) + (1 - y_i) log(1 - p_i))
             # where p_i = scipy.stats.cdf(f_i)
@@ -142,7 +146,6 @@ class AnchorBooster:
                 # r = np.where(y == 1, -dp / p, dp / (1 - p))  # d/df loss(f, y)
                 # The equation for r is numerically unstable. Instead, we use
                 # scipy.special.log_ndtr, with log_ndtr(f) = log(norm.cdf(f)).
-                y_tilde = np.where(y == 1, 1, -1)
                 log_phi = -0.5 * f**2 - 0.5 * np.log(2 * np.pi)  # log(norm.pdf(f))
                 r = -y_tilde * np.exp(log_phi - scipy.special.log_ndtr(y_tilde * f))
                 dr = -f * r + r**2  # d^2/df^2 loss(f, y)
@@ -200,7 +203,7 @@ class AnchorBooster:
             # We do the 2nd order update
             # beta = - (M^T [d^2/df^2 L] M)^{-1} M^T [d/df L]
 
-            # M^T x = bincount(leaves_masked, weights=x)
+            # M^T x = bincount(leaves, weights=x)
             g = np.bincount(leaves, weights=grad, minlength=num_leaves)
 
             # M^T diag(x) M = diag(np.bincount(leaves, weights=x))
@@ -210,7 +213,7 @@ class AnchorBooster:
                 minlength=num_leaves,
             )
             counts += self.params.get("lambda_l2", 0)
-
+            counts[counts == 0] = 1
             # Mdr^T P_Z Mdr = (Mdr^T Q) @ (Mdr^T Q)^T
             # One could also compute this using bincount, but it appears this
             # version using a sparse matrix is faster.
@@ -220,7 +223,7 @@ class AnchorBooster:
                     (np.arange(len(leaves)), leaves),
                 ),
                 shape=(len(leaves), num_leaves),
-                dtype=self._dtype,
+                dtype=np.float64,
             )
             B = Mdr.T.dot(Q)
             H = (self.gamma - 1) * B @ B.T
@@ -254,8 +257,8 @@ class AnchorBooster:
         if self.booster is None:
             raise ValueError("AnchorBoost has not yet been fitted.")
 
-        if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
-            X = X.to_arrow()
+        if hasattr(X, "to_numpy"):
+            X = X.to_numpy()
 
         scores = self.booster.predict(X, raw_score=True, **kwargs)
 
@@ -301,6 +304,9 @@ class AnchorBooster:
             A new instance of AnchorBooster with the updated leaf values.
         """  # noqa: E501
         self_copied = copy.deepcopy(self)
+
+        if hasattr(X, "to_numpy"):
+            X = X.to_numpy()
 
         # For some reason, the model params are not copied over.
         # https://github.com/microsoft/LightGBM/issues/6821
