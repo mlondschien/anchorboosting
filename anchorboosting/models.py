@@ -4,6 +4,7 @@ import lightgbm as lgb
 import numpy as np
 import scipy
 
+
 class AnchorBooster:
     """
     Boost the anchor loss.
