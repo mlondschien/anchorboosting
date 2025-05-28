@@ -18,6 +18,8 @@ or pip
 
    pip install anchorboosting
 
+API Reference
+=============
 
 .. autoclass:: anchorboosting.AnchorBooster
    :members: fit, predict, update, refit

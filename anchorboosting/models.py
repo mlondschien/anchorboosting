@@ -9,6 +9,47 @@ class AnchorBooster:
     """
     Boost the anchor loss.
 
+    For regression, the anchor loss :cite:p:`rothenhausler2021anchor` with causal
+    regularization parameter :math:`\\gamma` is
+
+    .. math:: \\ell(f, y) = \\frac{1}{2} \\| y - f \\|_2^2 + \\frac{1}{2} (\\gamma - 1) \\|P_A (y - f) \\|_2^2,
+
+    where :math:`P_A` is the projection onto the space spanned by the anchors :math:`A`.
+
+    For binary classification with :math:`y \\in \\{-1, 1\\}` and a probit link
+    function, the anchor loss :cite:p:`kook2023distributional` is
+
+    .. math:: \\ell(f, y) = - \\sum_{i=1}^n \\log( \\Phi(y_i f_i) ) + \\frac{1}{2} (\\gamma - 1) \\|P_A r \\|_2^2,
+
+    where :math:`r = - y \\phi(f) / \\Phi(y f)` is the gradient of the probit loss with
+    respect to the scores :math:`f`, and :math:`\\Phi` and :math:`\\phi` are the
+    cumulative distribution function and probability density function of the standard
+    normal distribution, respectively.
+
+    We boost the anchor loss with LightGBM.
+    Let :math:`f^j` be the boosted learner after :math:`j` steps of boosting, with
+    :math:`f^0 = \\frac{1}{n} \\sum_{i=1}^n y_i` (regression) or
+    :math:`f^0 = \\Phi^{-1}(\\frac{1}{n} \\sum_{i=1}^n y_i)` (binary classification).
+    We fit a decision tree :math:`t^{j+1} := - \\left. \\frac{\\partial}{\\partial f} \\ell(f, y) \\right|_{f = f^j}`` to the negative gradient of the anchor loss.
+    Let :math:`M \\in \\mathbb{R}^{n \\times \\mathrm{num. \\ leafs}}` be the one-hot encoding
+    of :math:`\\hat t^{j+1}(X)`'s leaf node indices.
+    Then,
+    :math:`M^T \\left. \\frac{\\partial}{\\partial f} \\ell(f, y) \\right|_{f = \\hat f^j(X)}`
+    and
+    :math:`M^T \\left.\\frac{\\partial^2}{\\partial f^2}\\ell(f, y)\\right|_{f = \\hat f^j(X)} M`
+    are the gradient and Hessian of the loss function
+    :math:`\\ell(\\hat f^j(X) + \\hat t^{j+1}(X), y) = \\ell(\\hat f^j(X) + M \\hat\\beta^{j+1}, y)`
+    with respect to :math:`\\hat t^{j+1}`'s leaf node values
+    :math:`\\hat\\beta^{j+1} \\in \\mathbb{R}^{\\mathrm{num. \\ leafs}}`.
+    We set them using a second order optimization step
+
+    .. math:: \\hat \\beta^{j+1} = - \\left( M^T \\left.\\frac{\\partial^2}{\\partial f^2}\\ell(f, y)\\right|_{f = \\hat f^j(X)} M \\right)^{-1} M^T \\left.\\frac{\\partial}{\\partial f}\\ell(f, y)\\right|_{f = \\hat f^j(X)}.
+
+    As the anchor regression loss is quadratic, this yields the global minimizer
+    :math:`\\hat \\beta^{j+1} = \\mathrm{argmin}_{\\beta} \\ell(\\hat f^j(X) + M \\beta, y)`.
+
+    Finally, set :math:`f^{j+1} = f^j + \\hat t^{j+1}`.
+
     Parameters
     ----------
     gamma: float
@@ -27,7 +68,7 @@ class AnchorBooster:
     **kwargs: dict
         Additional parameters for the LightGBM model. See LightGBM documentation for
         details. Supply `learning_rate` to set the learning rate.
-    """
+    """  # noqa: E501
 
     def __init__(
         self,
