@@ -3,8 +3,9 @@ Anchor Boosting
 
 Efficient tree-based nonlinear anchor regression and classification for Python.
 
-Installation
-------------
+.. toctree::
+   :maxdepth: 1
+   :caption: Installation
 
 You can install ``anchorboosting`` with conda
 
@@ -18,13 +19,12 @@ or pip
 
    pip install anchorboosting
 
-
-API Reference
--------------
+.. toctree::
+   :maxdepth: 1
+   :caption: API Reference
 
 .. autoclass:: anchorboosting.AnchorBooster
    :members: fit, predict, update, refit
-
 
 .. toctree::
    :maxdepth: 1
