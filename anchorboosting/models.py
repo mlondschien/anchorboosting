@@ -16,45 +16,45 @@ class AnchorBooster:
 
     where :math:`P_A` is the projection onto the space spanned by the anchors :math:`A`.
 
+    Let :math:`\\Phi` and :math:`\\phi` be cumulative distribution function and
+    probability density function of the Gaussian distribution.
     For binary classification with :math:`y \\in \\{-1, 1\\}` and a probit link
-    function, the anchor loss :cite:p:`kook2023distributional` is
+    function, the anchor loss :cite:p:`kook2022distributional` is
 
     .. math:: \\ell(f, y) = - \\sum_{i=1}^n \\log( \\Phi(y_i f_i) ) + \\frac{1}{2} (\\gamma - 1) \\|P_A r \\|_2^2,
 
     where :math:`r = - y \\phi(f) / \\Phi(y f)` is the gradient of the probit loss with
-    respect to the scores :math:`f`, and :math:`\\Phi` and :math:`\\phi` are the
-    cumulative distribution function and probability density function of the standard
-    normal distribution, respectively.
+    respect to the scores :math:`f`.
 
     We boost the anchor loss with LightGBM.
-    Let :math:`f^j` be the boosted learner after :math:`j` steps of boosting, with
-    :math:`f^0 = \\frac{1}{n} \\sum_{i=1}^n y_i` (regression) or
-    :math:`f^0 = \\Phi^{-1}(\\frac{1}{n} \\sum_{i=1}^n y_i)` (binary classification).
-    We fit a decision tree :math:`t^{j+1} := - \\left. \\frac{\\partial}{\\partial f} \\ell(f, y) \\right|_{f = f^j}`` to the negative gradient of the anchor loss.
+    Let :math:`\\hat f^j` be the boosted learner after :math:`j` steps of boosting, with
+    :math:`\\hat f^0 = \\frac{1}{n} \\sum_{i=1}^n y_i` (regression) or
+    :math:`\\hat f^0 = \\Phi^{-1}(\\frac{1}{n} \\sum_{i=1}^n y_i)` (binary classification).
+    We fit a decision tree :math:`\\hat t^{j+1} := - \\left. \\frac{\\mathrm{d}}{\\mathrm{d} f} \\ell(f, y) \\right|_{f = \\hat f^j(X)} \\sim X` to the anchor loss' negative gradient.
     Let :math:`M \\in \\mathbb{R}^{n \\times \\mathrm{num. \\ leafs}}` be the one-hot encoding
     of :math:`\\hat t^{j+1}(X)`'s leaf node indices.
-    Then,
-    :math:`M^T \\left. \\frac{\\partial}{\\partial f} \\ell(f, y) \\right|_{f = \\hat f^j(X)}`
+    Then
+    :math:`M^T \\left. \\frac{\\mathrm{d}}{\\mathrm{d} f} \\ell(f, y) \\right|_{f = \\hat f^j(X)}`
     and
-    :math:`M^T \\left.\\frac{\\partial^2}{\\partial f^2}\\ell(f, y)\\right|_{f = \\hat f^j(X)} M`
+    :math:`M^T \\left.\\frac{\\mathrm{d}^2}{\\mathrm{d} f^2}\\ell(f, y)\\right|_{f = \\hat f^j(X)} M`
     are the gradient and Hessian of the loss function
     :math:`\\ell(\\hat f^j(X) + \\hat t^{j+1}(X), y) = \\ell(\\hat f^j(X) + M \\hat\\beta^{j+1}, y)`
     with respect to :math:`\\hat t^{j+1}`'s leaf node values
     :math:`\\hat\\beta^{j+1} \\in \\mathbb{R}^{\\mathrm{num. \\ leafs}}`.
     We set them using a second order optimization step
 
-    .. math:: \\hat \\beta^{j+1} = - \\left( M^T \\left.\\frac{\\partial^2}{\\partial f^2}\\ell(f, y)\\right|_{f = \\hat f^j(X)} M \\right)^{-1} M^T \\left.\\frac{\\partial}{\\partial f}\\ell(f, y)\\right|_{f = \\hat f^j(X)}.
+    .. math:: \\hat \\beta^{j+1} = - \\mathrm{lr} \\left( M^T \\left.\\frac{\\mathrm{d}^2}{\\mathrm{d} f^2}\\ell(f, y)\\right|_{f = \\hat f^j(X)} M \\right)^{-1} M^T \\left.\\frac{\\mathrm{d}}{\\mathrm{d} f}\\ell(f, y)\\right|_{f = \\hat f^j(X)},
 
-    As the anchor regression loss is quadratic, this yields the global minimizer
-    :math:`\\hat \\beta^{j+1} = \\mathrm{argmin}_{\\beta} \\ell(\\hat f^j(X) + M \\beta, y)`.
+    where :math:`\\mathrm{lr}` is the learning rate, 0.1 by default.
 
-    Finally, set :math:`f^{j+1} = f^j + \\hat t^{j+1}`.
+    Finally, we set :math:`f^{j+1} = \\hat f^j + \\hat t^{j+1}`.
 
     Parameters
     ----------
     gamma: float
-        The gamma parameter for the anchor objective function. Must be non-negative. If
-        1, the objective is equivalent to a standard regression or probit objective.
+        The :math:`\\gamma` parameter for the anchor objective function. Must be
+        non-negative. If 1, the objective is equivalent to a standard regression or
+        probit classification objective.
         Larger values correspond to more causal regularization.
     dataset_params: dict or None
         The parameters for the LightGBM dataset. See LightGBM documentation for details.
@@ -65,6 +65,9 @@ class AnchorBooster:
         The objective function to use. Can be "regression" for regression or "binary"
         for classification with a probit link function. If "binary", the outcome values
         must be 0 or 1.
+    learning_rate: float, optional, default=0.1
+        The learning rate for the boosting. This is the :math:`\\mathrm{lr}` in the
+        second order optimization step. It controls the step size of the updates.
     **kwargs: dict
         Additional parameters for the LightGBM model. See LightGBM documentation for
         details. Supply `learning_rate` to set the learning rate.
@@ -76,15 +79,20 @@ class AnchorBooster:
         dataset_params=None,
         num_boost_round=100,
         objective="regression",
+        learning_rate=0.1,
         **kwargs,
     ):
         self.gamma = gamma
+        kwargs["learning_rate"] = learning_rate
+        kwargs["objective"] = "none"
+
         self.params = kwargs
         self.dataset_params = dataset_params or {}
         self.num_boost_round = num_boost_round
+        self.objective = objective
+
         self.booster = None
         self.init_score_ = None
-        self.objective = objective
 
     def fit(
         self,
@@ -94,7 +102,7 @@ class AnchorBooster:
         categorical_feature=None,
     ):
         """
-        Fit the model.
+        Fit the ``AnchorBooster``.
 
         Parameters
         ----------
@@ -104,9 +112,13 @@ class AnchorBooster:
             The outcome.
         Z : np.ndarray
             Anchors.
-        categorical_feature : list of str or int
-            List of categorical feature names or indices. If None, all features are
+        categorical_feature : list of str or int or None, optional
+            List of categorical feature names or indices. If ``None``, all features are
             assumed to be numerical.
+
+        Returns
+        -------
+        self : AnchorBooster
         """
         if self.objective != "regression" and not np.isin(y, [0, 1]).all():
             raise ValueError("For binary classification, y values must be in {0, 1}.")
@@ -150,6 +162,20 @@ class AnchorBooster:
         )
 
     def update(self, X, y, Z, num_iteration=1):
+        """
+        Update the already fitted ``AnchorBooster`` with new data.
+
+        Parameters
+        ----------
+        X : numpy.ndarray, polars.DataFrame, or pyarrow.Table
+            The input data.
+        y : np.ndarray
+            The outcome.
+        Z : np.ndarray
+            Anchors.
+        num_iteration : int
+            The number of additional boosting iterations to perform.
+        """
         if self.booster is None or self.init_score_ is None:
             raise ValueError("AnchorBoost has not yet been fitted.")
 
@@ -289,11 +315,11 @@ class AnchorBooster:
         ----------
         X : numpy.ndarray, polars.DataFrame, or pyarrow.Table
             The input data.
-        num_iteration : int
-            Number of boosting iterations to use. If -1, all are used. Else, needs to be
-            in [0, num_boost_round].
         raw_score : bool
-            If True, returns scores. If False, returns predicted probabilities.
+            If ``True``, returns scores. Returns predicted probabilities if
+            ``objective`` is ``"binary"`` and ``raw_score`` is ``False``.
+        kwargs : dict
+            Passed to ``lgb.Booster.predict``.
         """
         if self.booster is None:
             raise ValueError("AnchorBoost has not yet been fitted.")
@@ -312,9 +338,9 @@ class AnchorBooster:
         """
         Refit the model using new data.
 
-        Set :math:`f^0_\\mathrm{refit} =` ``init_score_``.
-        Starting from :math:`f^j_\\mathrm{refit}`, we drop the new data :math:`(X, y)`
-        down the tree :math:`\\hat t^{j+1}`.
+        Set :math:`\\hat f^0_\\mathrm{refit} =` ``init_score_``.
+        Starting from :math:`\\hat f^j_\\mathrm{refit}`, we drop the new data
+        :math:`(X, y)` down the :math:`j + 1`'th tree :math:`\\hat t^{j+1}`.
         Let :math:`\\hat \\beta_\\mathrm{new}^{j+1}` be the second order optimization
         of the loss :math:`\\ell(\\hat f^j_\\mathrm{refit} + \\hat t^{j+1}(X), y)`
         with respect to the leaf node values :math:`\\beta^{j+1}``of
@@ -325,8 +351,6 @@ class AnchorBooster:
         ``AnchorBooster.refit`` differs from ``lgbm.Booster.refit`` in that it supports
         probit regression and leaf nodes with no samples from the new data are not,
         updated, instead of being shrunk towards zero (as in LightGBM).
-
-        Refit is not in-place, but returns a new instance of ``AnchorBooster``.
 
         Parameters
         ----------
@@ -341,8 +365,7 @@ class AnchorBooster:
 
         Returns
         -------
-        AnchorBooster
-            A new instance of AnchorBooster with the updated leaf values.
+        self: AnchorBooster
         """  # noqa: E501
         self_copied = copy.deepcopy(self)
 
