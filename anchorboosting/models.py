@@ -356,18 +356,18 @@ class AnchorBooster:
         """
         Refit the model using new data.
 
-        Set :math:`\\hat f^0_\\mathrm{refit} =` ``init_score_``.
+        Set :math:`\\hat f^0_\\mathrm{refit} =` ``self.init_score_``.
         Starting from :math:`\\hat f^j_\\mathrm{refit}`, we drop the new data
         :math:`(X, y)` down the :math:`j + 1`'th tree :math:`\\hat t^{j+1}`.
         Let :math:`\\hat \\beta_\\mathrm{new}^{j+1}` be the second order optimization
         of the loss :math:`\\ell(\\hat f^j_\\mathrm{refit} + \\hat t^{j+1}(X), y)`
-        with respect to the leaf node values :math:`\\beta^{j+1}``of
+        with respect to the leaf node values :math:`\\beta^{j+1}` of
         :math:`\\hat t^{j+1}(X)`.
         We set
-        :math:`\\hat \\beta^{j+1}_\\mathrm{refit} = \\mathrm{decay rate} \\hat \\beta^{j+1}_\\mathrm{old} + (1 - \\mathrm{decay rate}) \\hat \\beta^{j+1}_\\mathrm{new}`.
+        :math:`\\hat \\beta^{j+1}_\\mathrm{refit} = \\mathrm{decay \\ rate} \\hat \\beta^{j+1}_\\mathrm{old} + (1 - \\mathrm{decay \\ rate}) \\hat \\beta^{j+1}_\\mathrm{new}`.
         Refitting updates the tree's leaf values, but not their structure.
         ``AnchorBooster.refit`` differs from ``lgbm.Booster.refit`` in that it supports
-        probit regression and leaf nodes with no samples from the new data are not,
+        probit regression and leaf nodes with no samples from the new data are not
         updated, instead of being shrunk towards zero (as in LightGBM).
 
         Parameters
