@@ -16,21 +16,21 @@ class AnchorBooster:
 
     where :math:`P_A` is the projection onto the space spanned by the anchors :math:`A`.
 
-    Let :math:`\\Phi` and :math:`\\phi` be cumulative distribution function and
+    Let :math:`\\Phi` and :math:`\\varphi` be cumulative distribution function and
     probability density function of the Gaussian distribution.
     For binary classification with :math:`y \\in \\{-1, 1\\}` and a probit link
     function, the anchor loss :cite:p:`kook2022distributional` is
 
     .. math:: \\ell(f, y) = - \\sum_{i=1}^n \\log( \\Phi(y_i f_i) ) + \\frac{1}{2} (\\gamma - 1) \\|P_A r \\|_2^2,
 
-    where :math:`r = - y \\phi(f) / \\Phi(y f)` is the gradient of the probit loss with
+    where :math:`r = - y \\varphi(f) / \\Phi(y f)` is the gradient of the probit loss with
     respect to the scores :math:`f`.
 
     We boost the anchor loss with LightGBM.
     Let :math:`\\hat f^j` be the boosted learner after :math:`j` steps of boosting, with
     :math:`\\hat f^0 = \\frac{1}{n} \\sum_{i=1}^n y_i` (regression) or
     :math:`\\hat f^0 = \\Phi^{-1}(\\frac{1}{n} \\sum_{i=1}^n y_i)` (binary classification).
-    We fit a decision tree :math:`\\hat t^{j+1} := - \\left. \\frac{\\mathrm{d}}{\\mathrm{d} f} \\ell(f, y) \\right|_{f = \\hat f^j(X)} \\sim X` to the anchor loss' negative gradient.
+    We fit a decision tree :math:`\\hat t^{j+1} := - \\left. \\frac{\\mathrm{d}}{\\mathrm{d} f} \\ell(f, y) \\right|_{f = \\hat f^j(X)} \\sim X` to the anchor losses negative gradient.
     Let :math:`M \\in \\mathbb{R}^{n \\times \\mathrm{num. \\ leafs}}` be the one-hot encoding
     of :math:`\\hat t^{j+1}(X)`'s leaf node indices.
     Then
@@ -43,7 +43,7 @@ class AnchorBooster:
     :math:`\\hat\\beta^{j+1} \\in \\mathbb{R}^{\\mathrm{num. \\ leafs}}`.
     We set them using a second order optimization step
 
-    .. math:: \\hat \\beta^{j+1} = - \\mathrm{lr} \\left( M^T \\left.\\frac{\\mathrm{d}^2}{\\mathrm{d} f^2}\\ell(f, y)\\right|_{f = \\hat f^j(X)} M \\right)^{-1} M^T \\left.\\frac{\\mathrm{d}}{\\mathrm{d} f}\\ell(f, y)\\right|_{f = \\hat f^j(X)},
+    .. math:: \\hat \\beta^{j+1} = - \\mathrm{lr} \\, \\cdot \\, \\left( M^T \\left.\\frac{\\mathrm{d}^2}{\\mathrm{d} f^2}\\ell(f, y)\\right|_{f = \\hat f^j(X)} M \\right)^{-1} M^T \\left.\\frac{\\mathrm{d}}{\\mathrm{d} f}\\ell(f, y)\\right|_{f = \\hat f^j(X)},
 
     where :math:`\\mathrm{lr}` is the learning rate, 0.1 by default.
 
@@ -62,15 +62,25 @@ class AnchorBooster:
     num_boost_round: int
         The number of boosting iterations. Default is 100.
     objective: str, optional, default="regression"
-        The objective function to use. Can be "regression" for regression or "binary"
-        for classification with a probit link function. If "binary", the outcome values
-        must be 0 or 1.
+        The objective function to use. Can be ``"regression"`` for regression or
+        ``"binary"`` for classification with a probit link function. If "binary", the
+        outcome values must be 0 or 1.
     learning_rate: float, optional, default=0.1
         The learning rate for the boosting. This is the :math:`\\mathrm{lr}` in the
         second order optimization step. It controls the step size of the updates.
     **kwargs: dict
         Additional parameters for the LightGBM model. See LightGBM documentation for
-        details. Supply `learning_rate` to set the learning rate.
+        details. We suggest reducing the tree's complexity by reducing ``max_depth`` or
+        ``num_leaves``.
+
+    Attributes
+    ----------
+    booster: lightgbm.Booster
+        The LightGBM booster object containing the trained model.
+    init_score_: float
+        The initial score used for the boosting. For regression, this is the mean of
+        the outcome values. For binary classification, this is the inverse probit link
+        applied to the prevalence.
 
     References
     ----------
