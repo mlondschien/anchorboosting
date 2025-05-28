@@ -71,6 +71,14 @@ class AnchorBooster:
     **kwargs: dict
         Additional parameters for the LightGBM model. See LightGBM documentation for
         details. Supply `learning_rate` to set the learning rate.
+
+    References
+    ----------
+    .. bibliography::
+       :filter: False
+
+       rothenhausler2021anchor
+       kook2022distributional
     """  # noqa: E501
 
     def __init__(

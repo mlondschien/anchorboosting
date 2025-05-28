@@ -1,12 +1,12 @@
-anchorboosting
-==============
+Anchor Boosting
+===============
 
 Efficient tree-based nonlinear anchor regression and classification for Python.
 
 Installation
-============
+------------
 
-You can install `anchorboosting` with conda
+You can install ``anchorboosting`` with conda
 
 ::
 
@@ -18,8 +18,9 @@ or pip
 
    pip install anchorboosting
 
+
 API Reference
-=============
+-------------
 
 .. autoclass:: anchorboosting.AnchorBooster
    :members: fit, predict, update, refit
@@ -31,3 +32,9 @@ API Reference
 
    GitHub <https://github.com/mlondschien/ivmodels>
    changelog
+
+
+Bibliography
+------------
+
+.. bibliography::
