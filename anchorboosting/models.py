@@ -103,7 +103,7 @@ class AnchorBooster:
         kwargs["objective"] = "none"
 
         self.params = kwargs
-        self.dataset_params = dataset_params or {}
+        self.dataset_params = dataset_params
         self.num_boost_round = num_boost_round
         self.objective = objective
 
@@ -163,7 +163,7 @@ class AnchorBooster:
             "categorical_feature": categorical_feature,
             "feature_name": feature_name,
             "init_score": np.ones(len(y), dtype=np.float64) * self.init_score_,
-            **self.dataset_params,
+            **(self.dataset_params or {}),
         }
 
         data = lgb.Dataset(**dataset_params)
