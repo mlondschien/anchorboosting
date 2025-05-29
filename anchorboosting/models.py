@@ -30,7 +30,7 @@ class AnchorBooster:
     Let :math:`\\hat f^j` be the boosted learner after :math:`j` steps of boosting, with
     :math:`\\hat f^0 = \\frac{1}{n} \\sum_{i=1}^n y_i` (regression) or
     :math:`\\hat f^0 = \\Phi^{-1}(\\frac{1}{n} \\sum_{i=1}^n y_i)` (binary classification).
-    We fit a decision tree :math:`\\hat t^{j+1} := - \\left. \\frac{\\mathrm{d}}{\\mathrm{d} f} \\ell(f, y) \\right|_{f = \\hat f^j(X)} \\sim X` to the anchor losses negative gradient.
+    We fit a decision tree :math:`\\hat t^{j+1} := - \\left. \\frac{\\mathrm{d}}{\\mathrm{d} f} \\ell(f, y) \\right|_{f = \\hat f^j(X)} \\sim X` to the anchor loss' negative gradient.
     Let :math:`M \\in \\mathbb{R}^{n \\times \\mathrm{num. \\ leafs}}` be the one-hot encoding
     of :math:`\\hat t^{j+1}(X)`'s leaf node indices.
     Then
@@ -47,7 +47,7 @@ class AnchorBooster:
 
     where :math:`\\mathrm{lr}` is the learning rate, 0.1 by default.
 
-    Finally, we set :math:`f^{j+1} = \\hat f^j + \\hat t^{j+1}`.
+    Finally, we set :math:`\\hat f^{j+1} = \\hat f^j + \\hat t^{j+1}`.
 
     Parameters
     ----------
