@@ -1,5 +1,3 @@
-import copy
-
 import lightgbm as lgb
 import numpy as np
 import scipy
@@ -385,14 +383,8 @@ class AnchorBooster:
         -------
         self: AnchorBooster
         """  # noqa: E501
-        self_copied = copy.deepcopy(self)
-
         if hasattr(X, "to_numpy"):
             X = X.to_numpy()
-
-        # For some reason, the model params are not copied over.
-        # https://github.com/microsoft/LightGBM/issues/6821
-        self_copied.booster.params = self.booster.params
 
         if self.objective == "binary" and not np.isin(y, [0, 1]).all():
             raise ValueError("For binary classification, y values must be in {0, 1}.")
@@ -400,7 +392,7 @@ class AnchorBooster:
         if self.objective == "binary":
             y_tilde = np.where(y == 1, 1, -1)
 
-        leaves = self_copied.booster.predict(X, pred_leaf=True)
+        leaves = self.booster.predict(X, pred_leaf=True)
         f = np.full(len(y), self.init_score_, dtype="float64")
 
         for idx in range(self.num_boost_round):
@@ -437,20 +429,20 @@ class AnchorBooster:
             np.add.at(arr, leaves[:, idx], grad_hess_ones)
 
             sum_grad = arr[:, 0]
-            sum_hess = arr[:, 1]
+            sum_hess = np.clip(arr[:, 1], 1.0, None)
             n_obs = arr[:, 2]
 
-            values = -sum_grad / sum_hess * self_copied.params.get("learning_rate", 0.1)
+            values = -sum_grad / sum_hess * self.params.get("learning_rate", 0.1)
 
             new_values = np.zeros(num_leaves, dtype="float64")
 
             for ldx in np.where(n_obs > 0)[0]:
-                old_value = self_copied.booster.get_leaf_output(idx, ldx)
+                old_value = self.booster.get_leaf_output(idx, ldx)
                 new_values[ldx] = (
                     decay_rate * old_value + (1 - decay_rate) * values[ldx]
                 )
-                self_copied.booster.set_leaf_output(idx, ldx, new_values[ldx])
+                self.booster.set_leaf_output(idx, ldx, new_values[ldx])
 
             f += new_values[leaves[:, idx]]
 
-        return self_copied
+        return self
