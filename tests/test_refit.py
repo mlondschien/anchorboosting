@@ -4,7 +4,7 @@ import scipy
 
 from anchorboosting.models import AnchorBooster
 from anchorboosting.simulate import f1, f2, simulate
-
+import scipy
 
 @pytest.mark.parametrize("seed", [0, 1])
 @pytest.mark.parametrize("fun", [f1, f2])
@@ -30,7 +30,7 @@ def test_refit(objective, seed, fun):
 
     np.testing.assert_array_equal(yhat, same_yhat)
 
-    same_anchor_booster = anchor_booster.refit(X, y, decay_rate=0)
+    same_anchor_booster = anchor_booster.refit(X, y, decay_rate=0.5)
     same_yhat = same_anchor_booster.predict(X, raw_score=True)
 
     np.testing.assert_array_equal(yhat, same_yhat)
