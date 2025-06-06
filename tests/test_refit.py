@@ -30,7 +30,7 @@ def test_refit(objective, seed, fun):
 
     np.testing.assert_array_equal(yhat, same_yhat)
 
-    same_anchor_booster = anchor_booster.refit(X, y, decay_rate=0)
+    same_anchor_booster = anchor_booster.refit(X, y, decay_rate=0.5)
     same_yhat = same_anchor_booster.predict(X, raw_score=True)
 
     np.testing.assert_array_equal(yhat, same_yhat)

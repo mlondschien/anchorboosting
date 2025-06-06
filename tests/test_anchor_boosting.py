@@ -147,7 +147,7 @@ def test_compare_anchor_boosting_to_lgbm(parameters):
             "objective": "regression",
             **parameters,
         },
-        train_set=lgb.Dataset(X.to_arrow(), y, categorical_feature=["x3"]),
+        train_set=lgb.Dataset(X.to_arrow(), y, categorical_feature=[2]),
         num_boost_round=50,
     )
 

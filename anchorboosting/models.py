@@ -1,6 +1,17 @@
+import os
+import sys
+from contextlib import contextmanager
+
 import lightgbm as lgb
 import numpy as np
 import scipy
+
+try:
+    import polars as pl
+
+    _POLARS_INSTALLED = True
+except ImportError:
+    _POLARS_INSTALLED = False
 
 
 class AnchorBooster:
@@ -46,6 +57,9 @@ class AnchorBooster:
     where :math:`\\mathrm{lr}` is the learning rate, 0.1 by default.
 
     Finally, we set :math:`\\hat f^{j+1} = \\hat f^j + \\hat t^{j+1}`.
+
+    For best performance, set OMP_NUM_THREADS to the number of CPU cores available (not
+    threads) before training.
 
     Parameters
     ----------
@@ -114,7 +128,7 @@ class AnchorBooster:
         self,
         X,
         y,
-        Z,
+        Z=None,
         categorical_feature=None,
     ):
         """
@@ -122,12 +136,12 @@ class AnchorBooster:
 
         Parameters
         ----------
-        X : polars.DataFrame
+        X : ``pl.DataFrame`` or ``np.ndarray`` or ``pyarrow.Table`` or ``pd.DataFrame``
             The input data.
         y : np.ndarray
             The outcome.
         Z : np.ndarray
-            Anchors.
+            Anchors. One-hot encode categorical anchors.
         categorical_feature : list of str or int or None, optional
             List of categorical feature names or indices. If ``None``, all features are
             assumed to be numerical.
@@ -138,6 +152,11 @@ class AnchorBooster:
         """
         if self.objective != "regression" and not np.isin(y, [0, 1]).all():
             raise ValueError("For binary classification, y values must be in {0, 1}.")
+
+        if Z is None:
+            Z = np.zeros(shape=(len(y), 0))
+
+        y = y.flatten()
 
         if self.objective == "regression":
             self.init_score_ = np.mean(y)
@@ -151,11 +170,9 @@ class AnchorBooster:
 
         if hasattr(X, "columns"):
             feature_name = X.columns
-        else:
-            feature_name = None
 
-        if hasattr(X, "to_numpy"):
-            X = X.to_numpy()
+        if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
+            X = X.to_arrow()
 
         dataset_params = {
             "data": X,
@@ -170,49 +187,20 @@ class AnchorBooster:
 
         self.booster = lgb.Booster(params=self.params, train_set=data)
 
-        return self.update(
-            X,
-            y,
-            Z=Z,
-            num_iteration=self.num_boost_round,
-        )
-
-    def update(self, X, y, Z, num_iteration=1):
-        """
-        Update the already fitted ``AnchorBooster`` with new data.
-
-        Parameters
-        ----------
-        X : numpy.ndarray, polars.DataFrame, or pyarrow.Table
-            The input data.
-        y : np.ndarray
-            The outcome.
-        Z : np.ndarray
-            Anchors.
-        num_iteration : int
-            The number of additional boosting iterations to perform.
-        """
-        if self.booster is None or self.init_score_ is None:
-            raise ValueError("AnchorBoost has not yet been fitted.")
-
-        if hasattr(X, "to_numpy"):
-            X = X.to_numpy()
-
-        y = y.flatten()
-
-        current_iteration = self.booster.current_iteration()
-        if current_iteration == 0:
-            f = np.ones(len(y), dtype=np.float64) * self.init_score_
-        else:
-            f = self.booster.predict(X, raw_score=True) + self.init_score_
-            f = f.astype(np.float64)
+        f = np.ones(len(y), dtype=np.float64) * self.init_score_
+        booster_preds = f.copy()
 
         Q, _ = np.linalg.qr(Z, mode="reduced")  # P_Z f = Q @ (Q^T @ f)
 
         if self.objective == "binary":
             y_tilde = np.where(y == 1, 1, -1).astype(np.float64)
 
-        for idx in range(current_iteration, current_iteration + num_iteration):
+        max_num_leaves = self.params.get("num_leaves", 31)
+        max_depth = self.params.get("max_depth", None)
+        if max_depth is not None and max_depth > 0:
+            max_num_leaves = min(2**max_depth, max_num_leaves)
+
+        for idx in range(self.num_boost_round):
             # For regression, the loss (without anchor) is
             # loss(f, y) = 0.5 * || y - f ||^2
             if self.objective == "regression":
@@ -230,7 +218,8 @@ class AnchorBooster:
                 # The equation for r is numerically unstable. Instead, we use
                 # scipy.special.log_ndtr, with log_ndtr(f) = log(norm.cdf(f)).
                 log_phi = -0.5 * f**2 - 0.5 * np.log(2 * np.pi)  # log(norm.pdf(f))
-                r = -y_tilde * np.exp(log_phi - scipy.special.log_ndtr(y_tilde * f))
+                log_ndtr = scipy.special.log_ndtr(y_tilde * f)
+                r = -y_tilde * np.exp(log_phi - log_ndtr)
                 dr = -f * r + r**2  # d^2/df^2 loss(f, y)
                 ddr = (f**2 - 1) * r - 3 * f * r**2 + 2 * r**3  # d^3/df^3 loss
 
@@ -263,10 +252,50 @@ class AnchorBooster:
                 print(f"Finished training after {idx} iterations.")
                 break
 
-            leaves = self.booster.predict(
-                X, start_iteration=idx, num_iteration=1, pred_leaf=True
-            ).flatten()
-            num_leaves = np.max(leaves) + 1
+            # We recover the leaf indices of the current tree, avoiding (slow) call to
+            # self.booster.predict(X, pred_leaf=True). It's a bit of dark magic, but the
+            # speedup is worth it.
+            # leaves = self.booster.predict(
+            #     X, start_iteration=idx, num_iteration=1, pred_leaf=True
+            # ).flatten()
+            leaf_values = []
+            num_leaves = max_num_leaves
+
+            # There exists no "booster.get_num_leafs(idx)" in LGBM. One could use
+            # num_leaves = self.booster.dump_model()["tree_info"][idx]["num_leaves"]
+            # but this is slow. The try-except loop below is faster.
+            # Even though we catch the error, LightGBM prints to stderr somewhere in the
+            # C-code. We catch and suppress this.
+            for ldx in range(max_num_leaves):
+                try:
+                    with _suppress_stderr():
+                        val = self.booster.get_leaf_output(idx, ldx)
+                    leaf_values.append(val)
+                except lgb.basic.LightGBMError:
+                    num_leaves = ldx
+                    break
+
+            leaf_values = np.array(leaf_values, dtype=np.float64)
+
+            # The _Booster__inner_predict(0) checks if __inner_predict_buffer[0] is None
+            self.booster._Booster__inner_predict_buffer = [None]
+            booster_preds_new = self.booster._Booster__inner_predict(0)
+
+            booster_preds_this_iter = booster_preds_new - booster_preds
+            booster_preds = booster_preds_new
+
+            leaf_values_argsort = np.argsort(leaf_values)
+            leaf_values_sorted = leaf_values[leaf_values_argsort]
+
+            tol = np.min(np.abs(np.diff(leaf_values_sorted))) * 0.1
+            # This finds indices i such that
+            # leaf_values[argsort][i-1] + tol < preds <= leaf_values[argsort][i] + tol.
+            leaves = np.searchsorted(
+                leaf_values_sorted + tol,
+                booster_preds_this_iter,
+                side="left",
+            )
+            leaves = leaf_values_argsort[leaves]
 
             # We wish to do 2nd order updates in the leaves. Since the anchor regression
             # objective is quadratic, for regression a 2nd order update is equal to the
@@ -340,8 +369,8 @@ class AnchorBooster:
         if self.booster is None:
             raise ValueError("AnchorBoost has not yet been fitted.")
 
-        if hasattr(X, "to_numpy"):
-            X = X.to_numpy()
+        if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
+            X = X.to_arrow()
 
         scores = self.booster.predict(X, raw_score=True, **kwargs)
 
@@ -383,8 +412,8 @@ class AnchorBooster:
         -------
         self: AnchorBooster
         """  # noqa: E501
-        if hasattr(X, "to_numpy"):
-            X = X.to_numpy()
+        if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
+            X = X.to_arrow()
 
         if self.objective == "binary" and not np.isin(y, [0, 1]).all():
             raise ValueError("For binary classification, y values must be in {0, 1}.")
@@ -393,48 +422,39 @@ class AnchorBooster:
             y_tilde = np.where(y == 1, 1, -1)
 
         leaves = self.booster.predict(X, pred_leaf=True)
+        num_leaves = np.max(leaves, axis=0) + 1
+
         f = np.full(len(y), self.init_score_, dtype="float64")
 
         for idx in range(self.num_boost_round):
+            n_obs = np.bincount(leaves[:, idx], minlength=num_leaves[idx])
+
             if self.objective == "regression":
-                grad_hess_ones = np.empty((len(y), 3), dtype="float64")
-                grad_hess_ones[:, 0] = f - y
-                grad_hess_ones[:, 1:] = 1.0
-                # g = f - y
-                # h = 1.0
+                sum_grad = np.bincount(
+                    leaves[:, idx],
+                    weights=f - y,  # grad
+                    minlength=num_leaves[idx],
+                )
+                sum_hess = np.clip(n_obs, 1.0, None)
+
             elif self.objective == "binary":
                 log_phi = -0.5 * f**2 - 0.5 * np.log(2 * np.pi)  # log(norm.pdf(f))
-                grad_hess_ones = np.empty((len(y), 3), dtype="float64")
-                grad_hess_ones[:, 0] = -y_tilde * np.exp(
-                    log_phi - scipy.special.log_ndtr(y_tilde * f)
+                grad = -y_tilde * np.exp(log_phi - scipy.special.log_ndtr(y_tilde * f))
+                sum_grad = np.bincount(
+                    leaves[:, idx], weights=grad, minlength=num_leaves[idx]
                 )
-                grad_hess_ones[:, 1] = (
-                    -f * grad_hess_ones[:, 0] + grad_hess_ones[:, 0] ** 2
+                sum_hess = np.bincount(
+                    leaves[:, idx],
+                    weights=-f * grad + grad**2,  # hess
+                    minlength=num_leaves[idx],
                 )
-                grad_hess_ones[:, 2] = 1.0
-                # g = -y_tilde * np.exp(log_phi - scipy.special.log_ndtr(y_tilde * f))
-                # h = -f * g + g**2
+                sum_hess = np.clip(sum_hess, 1.0, None)
             else:
                 raise ValueError("Objective must be 'regression' or 'binary'.")
 
-            num_leaves = np.max(leaves[:, idx]) + 1
-
-            # We aggregate gradients, hessians, and counts over the leaves.
-            # A bincount is faster than a for loop. Still this passes 3x through the
-            # data. We use np.add.at to do this in a single pass and avoid a copy.
-            # n_obs = np.bincount(leaves[:, idx], minlength=num_leaves)
-            # sum_grad = np.bincount(leaves[:, idx], weights=g, minlength=num_leaves)
-            # sum_hess = np.bincount(leaves[:, idx], weights=h, minlength=num_leaves)
-            arr = np.zeros((num_leaves, 3), dtype=np.float64)
-            np.add.at(arr, leaves[:, idx], grad_hess_ones)
-
-            sum_grad = arr[:, 0]
-            sum_hess = np.clip(arr[:, 1], 1.0, None)
-            n_obs = arr[:, 2]
-
             values = -sum_grad / sum_hess * self.params.get("learning_rate", 0.1)
 
-            new_values = np.zeros(num_leaves, dtype="float64")
+            new_values = np.zeros(num_leaves[idx], dtype="float64")
 
             for ldx in np.where(n_obs > 0)[0]:
                 old_value = self.booster.get_leaf_output(idx, ldx)
@@ -446,3 +466,20 @@ class AnchorBooster:
             f += new_values[leaves[:, idx]]
 
         return self
+
+
+@contextmanager
+def _suppress_stderr():
+    """ChatGPT wrote this for me."""
+    stderr_fd = sys.stderr.fileno()
+    old_stderr_fd = os.dup(stderr_fd)
+
+    devnull_fd = os.open(os.devnull, os.O_RDWR)
+
+    try:
+        os.dup2(devnull_fd, stderr_fd)  # redirect FD 2 → /dev/null
+        yield
+    finally:
+        os.dup2(old_stderr_fd, stderr_fd)  # put the old stderr back
+        os.close(old_stderr_fd)
+        os.close(devnull_fd)
