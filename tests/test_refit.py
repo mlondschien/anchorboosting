@@ -4,7 +4,7 @@ import scipy
 
 from anchorboosting.models import AnchorBooster
 from anchorboosting.simulate import f1, f2, simulate
-import scipy
+
 
 @pytest.mark.parametrize("seed", [0, 1])
 @pytest.mark.parametrize("fun", [f1, f2])

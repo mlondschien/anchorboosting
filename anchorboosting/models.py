@@ -1,10 +1,11 @@
+import os
+import sys
+from contextlib import contextmanager
+
 import lightgbm as lgb
 import numpy as np
 import scipy
 from lightgbm.basic import LightGBMError
-import os
-import sys
-from contextlib import contextmanager
 
 try:
     import polars as pl
@@ -157,7 +158,7 @@ class AnchorBooster:
             Z = np.zeros(shape=(len(y), 0))
 
         y = y.flatten()
-        
+
         if self.objective == "regression":
             self.init_score_ = np.mean(y)
         elif self.objective == "binary":
@@ -170,10 +171,10 @@ class AnchorBooster:
 
         if hasattr(X, "columns"):
             feature_name = X.columns
-    
+
         if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
             X = X.to_arrow()
-    
+
         dataset_params = {
             "data": X,
             "label": y,
@@ -198,8 +199,8 @@ class AnchorBooster:
         max_num_leaves = self.params.get("num_leaves", 31)
         max_depth = self.params.get("max_depth", None)
         if max_depth is not None and max_depth > 0:
-            max_num_leaves = min(2 ** max_depth, max_num_leaves)
-            
+            max_num_leaves = min(2**max_depth, max_num_leaves)
+
         for idx in range(self.num_boost_round):
             # For regression, the loss (without anchor) is
             # loss(f, y) = 0.5 * || y - f ||^2
@@ -252,7 +253,7 @@ class AnchorBooster:
             if is_finished:
                 print(f"Finished training after {idx} iterations.")
                 break
-            
+
             # We recover the leaf indices of the current tree, avoiding (slow) call to
             # self.booster.predict(X, pred_leaf=True). It's a bit of dark magic, but the
             # speedup is worth it.
@@ -270,7 +271,7 @@ class AnchorBooster:
             for ldx in range(max_num_leaves):
                 try:
                     with _suppress_stderr():
-                      val = self.booster.get_leaf_output(idx, ldx)
+                        val = self.booster.get_leaf_output(idx, ldx)
                     leaf_values.append(val)
                 except LightGBMError:
                     num_leaves = ldx
@@ -294,7 +295,7 @@ class AnchorBooster:
             leaves = np.searchsorted(
                 leaf_values_sorted + tol,
                 booster_preds_this_iter,
-                side='left',
+                side="left",
             )
             leaves = leaf_values_argsort[leaves]
 
@@ -442,14 +443,12 @@ class AnchorBooster:
                 log_phi = -0.5 * f**2 - 0.5 * np.log(2 * np.pi)  # log(norm.pdf(f))
                 grad = -y_tilde * np.exp(log_phi - scipy.special.log_ndtr(y_tilde * f))
                 sum_grad = np.bincount(
-                    leaves[:, idx],
-                    weights=grad,
-                    minlength=num_leaves[idx]
+                    leaves[:, idx], weights=grad, minlength=num_leaves[idx]
                 )
                 sum_hess = np.bincount(
                     leaves[:, idx],
-                    weights=-f * grad + grad**2,  # hess 
-                    minlength=num_leaves[idx]
+                    weights=-f * grad + grad**2,  # hess
+                    minlength=num_leaves[idx],
                 )
                 sum_hess = np.clip(sum_hess, 1.0, None)
             else:
@@ -480,9 +479,9 @@ def _suppress_stderr():
     devnull_fd = os.open(os.devnull, os.O_RDWR)
 
     try:
-        os.dup2(devnull_fd, stderr_fd)     # redirect FD 2 → /dev/null
+        os.dup2(devnull_fd, stderr_fd)  # redirect FD 2 → /dev/null
         yield
     finally:
-        os.dup2(old_stderr_fd, stderr_fd)   # put the old stderr back
+        os.dup2(old_stderr_fd, stderr_fd)  # put the old stderr back
         os.close(old_stderr_fd)
         os.close(devnull_fd)
