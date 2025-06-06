@@ -5,7 +5,6 @@ from contextlib import contextmanager
 import lightgbm as lgb
 import numpy as np
 import scipy
-from lightgbm.basic import LightGBMError
 
 try:
     import polars as pl
@@ -225,7 +224,6 @@ class AnchorBooster:
                 ddr = (f**2 - 1) * r - 3 * f * r**2 + 2 * r**3  # d^3/df^3 loss
 
             r_proj = Q @ (Q.T @ r)
-            r_proj = r
             grad = r + (self.gamma - 1) * r_proj * dr
 
             # We wish to fit one additional tree. Intuitively, one would use
@@ -273,7 +271,7 @@ class AnchorBooster:
                     with _suppress_stderr():
                         val = self.booster.get_leaf_output(idx, ldx)
                     leaf_values.append(val)
-                except LightGBMError:
+                except lgb.basic.LightGBMError:
                     num_leaves = ldx
                     break
 
