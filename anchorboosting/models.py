@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import lightgbm as lgb
 import numpy as np
 import scipy
+from logging import getLogger
 
 try:
     import polars as pl
@@ -13,6 +14,7 @@ try:
 except ImportError:
     _POLARS_INSTALLED = False
 
+logger = getLogger(__name__)
 
 class AnchorBooster:
     """
@@ -249,7 +251,7 @@ class AnchorBooster:
             is_finished = self.booster._Booster__boost(grad, dr)
 
             if is_finished:
-                print(f"Finished training after {idx} iterations.")
+                logger.info(f"Finished training after {idx} iterations.")
                 break
 
             # We recover the leaf indices of the current tree, avoiding (slow) call to
@@ -262,7 +264,7 @@ class AnchorBooster:
             num_leaves = max_num_leaves
 
             # There exists no "booster.get_num_leafs(idx)" in LGBM. One could use
-            # num_leaves = self.booster.dump_model()["tree_info"][idx]["num_leaves"]
+            # num_leaves = self.booster.dump_model()["tree_info"][idx]["num_leaves"],
             # but this is slow. The try-except loop below is faster.
             # Even though we catch the error, LightGBM prints to stderr somewhere in the
             # C-code. We catch and suppress this.
@@ -288,14 +290,27 @@ class AnchorBooster:
             leaf_values_sorted = leaf_values[leaf_values_argsort]
 
             tol = np.min(np.abs(np.diff(leaf_values_sorted))) * 0.1
-            # This finds indices i such that
-            # leaf_values[argsort][i-1] + tol < preds <= leaf_values[argsort][i] + tol.
-            leaves = np.searchsorted(
-                leaf_values_sorted + tol,
-                booster_preds_this_iter,
-                side="left",
-            )
-            leaves = leaf_values_argsort[leaves]
+            # If min_gain_to_split=0, LightGBM will split a leaf with zero variance
+            # (e.g., all same class in binary classification during first boosting
+            # iteration with f=const) into two leaves. Then, there are 2 leafs with
+            # exactly the same value and our approach above cannot differentiate them.
+            if tol < 1e-12:
+                logger.info(
+                    "LightGBM split a leaf with (almost) zero variance at iteration "
+                    f"{idx}. Consider setting `min_gain_to_split > 0`."
+                )
+                leaves = self.booster.predict(
+                    X, start_iteration=idx, num_iteration=1, pred_leaf=True
+                ).flatten()
+            else:
+                # searchsorted finds indices i such that
+                # leaf_values_sorted[i-1] + tol < preds <=leaf_values_sorted[i] + tol.
+                leaves = np.searchsorted(
+                    leaf_values_sorted + tol,
+                    booster_preds_this_iter,
+                    side="left",
+                )
+                leaves = leaf_values_argsort[leaves]
 
             # We wish to do 2nd order updates in the leaves. Since the anchor regression
             # objective is quadratic, for regression a 2nd order update is equal to the
@@ -325,7 +340,8 @@ class AnchorBooster:
                 minlength=num_leaves,
             )
             counts += self.params.get("lambda_l2", 0)
-            counts[counts == 0] = 1
+            counts[counts == 0] = 1  # counts==0 should never happen.
+
             # Mdr^T P_Z Mdr = (Mdr^T Q) @ (Mdr^T Q)^T
             # One could also compute this using bincount, but it appears this
             # version using a sparse matrix is faster.
@@ -470,15 +486,14 @@ class AnchorBooster:
 
 @contextmanager
 def _suppress_stderr():
-    """ChatGPT wrote this for me."""
-    stderr_fd = sys.stderr.fileno()
-    old_stderr_fd = os.dup(stderr_fd)
+    stderr_fd = sys.stderr.fileno()  # 2
+    old_stderr_fd = os.dup(stderr_fd)  # keep to restore later
 
-    devnull_fd = os.open(os.devnull, os.O_RDWR)
+    devnull_fd = os.open(os.devnull, os.O_RDWR)  # open /dev/null for writing
 
     try:
-        os.dup2(devnull_fd, stderr_fd)  # redirect FD 2 → /dev/null
-        yield
+        os.dup2(devnull_fd, stderr_fd)  # redirect 2 → /dev/null
+        yield  # run my code
     finally:
         os.dup2(old_stderr_fd, stderr_fd)  # put the old stderr back
         os.close(old_stderr_fd)
