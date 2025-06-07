@@ -63,7 +63,6 @@ class AnchorBooster:
     .. math:: \\hat \\beta^{j+1} = - \\mathrm{lr} \\, \\cdot \\, \\left( M^T \\left.\\frac{\\mathrm{d}^2}{\\mathrm{d} f^2}\\ell(f, y)\\right|_{f = \\hat f^j(X)} M \\right)^{-1} M^T \\left.\\frac{\\mathrm{d}}{\\mathrm{d} f}\\ell(f, y)\\right|_{f = \\hat f^j(X)},
 
     where :math:`\\mathrm{lr}` is the learning rate, 0.1 by default.
-
     Finally, we set :math:`\\hat f^{j+1} = \\hat f^j + \\hat t^{j+1}`.
 
     For optimal speed, set the environment variable ``OMP_NUM_THREADS`` to the number of
