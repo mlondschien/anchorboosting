@@ -98,8 +98,8 @@ class AnchorBooster:
 
     Attributes
     ----------
-    booster: lightgbm.Booster
-        The LightGBM booster object containing the trained model.
+    booster_: lightgbm.Booster
+        The LightGBM booster containing the trained model.
     init_score_: float
         The initial score used for the boosting. For regression, this is the mean of
         the outcome values. For binary classification, this is the inverse probit link
