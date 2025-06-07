@@ -31,7 +31,7 @@ def test_anchor_boosting_second_order(gamma, objective):
 
     f = model.predict(x, num_iteration=num_boost_round - 1, raw_score=True)
 
-    leaves = model.booster.predict(
+    leaves = model.booster_.predict(
         x.to_arrow(),
         pred_leaf=True,
         start_iteration=num_boost_round - 1,
@@ -73,7 +73,7 @@ def test_anchor_boosting_second_order(gamma, objective):
 
     for i in range(num_leaves):
         assert np.allclose(
-            model.booster.get_leaf_output(9, i),
+            model.booster_.get_leaf_output(9, i),
             expected_leaf_values[i],
             atol=1e-5,
             rtol=1e-5,
