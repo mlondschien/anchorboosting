@@ -66,8 +66,12 @@ class AnchorBooster:
 
     Finally, we set :math:`\\hat f^{j+1} = \\hat f^j + \\hat t^{j+1}`.
 
-    For best performance, set OMP_NUM_THREADS to the number of CPU cores available (not
-    threads) before training.
+    For optimal speed, set the environment variable ``OMP_NUM_THREADS`` to the number of
+    CPU cores available (not threads) before training. For performance, we recommend
+    reducing the tree's variance by restricting their maximum depth or number of leaves,
+    e.g., by setting ``max_depth=3``. Also, consider setting ``min_gain_to_split=0.1``
+    (or some other small, non-zero value) to keep LightGBM from splitting leaves with
+    zero variance.
 
     Parameters
     ----------
