@@ -298,7 +298,7 @@ class AnchorBooster:
             if tol < 1e-12:
                 logger.info(
                     "LightGBM split a leaf with (almost) zero variance at iteration "
-                    f"{idx}. Consider setting `min_gain_to_split > 0`."
+                    f"{idx}. Consider setting a nonzero `min_gain_to_split`."
                 )
                 leaves = self.booster.predict(
                     X, start_iteration=idx, num_iteration=1, pred_leaf=True
