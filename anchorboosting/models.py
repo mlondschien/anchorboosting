@@ -36,7 +36,8 @@ class AnchorBooster:
     .. math:: \\ell(f, y) = - \\sum_{i=1}^n \\log( \\Phi(y_i f_i) ) + \\frac{1}{2} (\\gamma - 1) \\|P_A r \\|_2^2,
 
     where :math:`r = - y \\varphi(f) / \\Phi(y f)` is the gradient of the probit loss with
-    respect to the scores :math:`f`.
+    respect to the scores :math:`f`. We use a probit link instead of logistic as the
+    resulting anchor loss is convex.
 
     We boost the anchor loss with LightGBM.
     Let :math:`\\hat f^j` be the boosted learner after :math:`j` steps of boosting, with
