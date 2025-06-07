@@ -1,11 +1,11 @@
 import os
 import sys
 from contextlib import contextmanager
+from logging import getLogger
 
 import lightgbm as lgb
 import numpy as np
 import scipy
-from logging import getLogger
 
 try:
     import polars as pl
@@ -15,6 +15,7 @@ except ImportError:
     _POLARS_INSTALLED = False
 
 logger = getLogger(__name__)
+
 
 class AnchorBooster:
     """
@@ -383,7 +384,7 @@ class AnchorBooster:
             Passed to ``lgb.Booster.predict``.
         """
         if self.booster is None:
-            raise ValueError("AnchorBoost has not yet been fitted.")
+            raise ValueError("AnchorBooster has not yet been fitted.")
 
         if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
             X = X.to_arrow()
