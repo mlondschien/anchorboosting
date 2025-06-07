@@ -26,7 +26,8 @@ class AnchorBooster:
 
     .. math:: \\ell(f, y) = \\frac{1}{2} \\| y - f \\|_2^2 + \\frac{1}{2} (\\gamma - 1) \\|P_A (y - f) \\|_2^2,
 
-    where :math:`P_A` is the projection onto the space spanned by the anchors :math:`A`.
+    where :math:`P_A = A (A^T A)^{-1} A^T` is the linear projection onto the anchor
+    :math:`A`'s column space .
 
     Let :math:`\\Phi` and :math:`\\varphi` be cumulative distribution function and
     probability density function of the Gaussian distribution.
@@ -35,15 +36,18 @@ class AnchorBooster:
 
     .. math:: \\ell(f, y) = - \\sum_{i=1}^n \\log( \\Phi(y_i f_i) ) + \\frac{1}{2} (\\gamma - 1) \\|P_A r \\|_2^2,
 
-    where :math:`r = - y \\varphi(f) / \\Phi(y f)` is the gradient of the probit loss with
-    respect to the scores :math:`f`. We use a probit link instead of logistic as the
-    resulting anchor loss is convex.
+    where :math:`r = - y \\varphi(f) / \\Phi(y f)` is the gradient of the probit loss
+    :math:`- \\sum_{i=1}^n \\log( \\Phi(y_i f_i) )` with respect to the scores
+    :math:`f`. We use a probit link instead of logistic as the resulting anchor loss is
+    convex.
 
     We boost the anchor loss with LightGBM.
     Let :math:`\\hat f^j` be the boosted learner after :math:`j` steps of boosting, with
     :math:`\\hat f^0 = \\frac{1}{n} \\sum_{i=1}^n y_i` (regression) or
     :math:`\\hat f^0 = \\Phi^{-1}(\\frac{1}{n} \\sum_{i=1}^n y_i)` (binary classification).
-    We fit a decision tree :math:`\\hat t^{j+1} := - \\left. \\frac{\\mathrm{d}}{\\mathrm{d} f} \\ell(f, y) \\right|_{f = \\hat f^j(X)} \\sim X` to the anchor loss' negative gradient.
+    We fit a decision tree
+    :math:`\\hat t^{j+1} := - \\left. \\frac{\\mathrm{d}}{\\mathrm{d} f} \\ell(f, y) \\right|_{f = \\hat f^j(X)} \\sim X`
+    to the anchor loss' negative gradient.
     Let :math:`M \\in \\mathbb{R}^{n \\times \\mathrm{num. \\ leafs}}` be the one-hot encoding
     of :math:`\\hat t^{j+1}(X)`'s leaf node indices.
     Then
