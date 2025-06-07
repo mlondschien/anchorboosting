@@ -87,15 +87,15 @@ class AnchorBooster:
         The number of boosting iterations. Default is 100.
     objective: str, optional, default="regression"
         The objective function to use. Can be ``"regression"`` for regression or
-        ``"binary"`` for classification with a probit link function. If "binary", the
-        outcome values must be 0 or 1.
+        ``"binary"`` for classification with a probit link function. If ``"binary"``,
+        the outcome values must be 0 or 1.
     learning_rate: float, optional, default=0.1
         The learning rate for the boosting. This is the :math:`\\mathrm{lr}` in the
         second order optimization step. It controls the step size of the updates.
     **kwargs: dict
         Additional parameters for the LightGBM model. See LightGBM documentation for
         details. We suggest reducing the tree's complexity by reducing ``max_depth`` or
-        ``num_leaves``.
+        ``num_leaves`` and setting ``min_gain_to_split`` to a non-zero value.
 
     Attributes
     ----------
@@ -132,9 +132,6 @@ class AnchorBooster:
         self.dataset_params = dataset_params
         self.num_boost_round = num_boost_round
         self.objective = objective
-
-        self.booster = None
-        self.init_score_ = None
 
     def fit(
         self,
@@ -197,7 +194,7 @@ class AnchorBooster:
 
         data = lgb.Dataset(**dataset_params)
 
-        self.booster = lgb.Booster(params=self.params, train_set=data)
+        self.booster_ = lgb.Booster(params=self.params, train_set=data)
 
         f = np.ones(len(y), dtype=np.float64) * self.init_score_
         booster_preds = f.copy()
@@ -239,7 +236,7 @@ class AnchorBooster:
             grad = r + (self.gamma - 1) * r_proj * dr
 
             # We wish to fit one additional tree. Intuitively, one would use
-            # is_finished = self.booster.update(fobj=self.objective.objective)
+            # is_finished = self.booster_.update(fobj=self.objective.objective)
             # for this. This makes a call to self.__inner_predict(0) to get the current
             # predictions for all existing trees. See:
             # https://github.com/microsoft/LightGBM/blob/18c11f861118aa889b9d4579c2888d\
@@ -248,9 +245,9 @@ class AnchorBooster:
             # However, this cache is based on the "original" tree values, not the one
             # we set below. We thus use "our own" predictions and skip __inner_predict.
             # No idea what the set_objective_to_none does, but lgbm raises if we don't.
-            self.booster._Booster__inner_predict_buffer = None
-            if not self.booster._Booster__set_objective_to_none:
-                self.booster.reset_parameter(
+            self.booster_._Booster__inner_predict_buffer = None
+            if not self.booster_._Booster__set_objective_to_none:
+                self.booster_.reset_parameter(
                     {"objective": "none"}
                 )._Booster__set_objective_to_none = True
 
@@ -258,30 +255,30 @@ class AnchorBooster:
             # criteria. c.f. https://github.com/microsoft/LightGBM/pull/6890
             # The hessian is used only for the `min_hessian_in_leaf` parameter to
             # avoid numerical instabilities.
-            is_finished = self.booster._Booster__boost(grad, dr)
+            is_finished = self.booster_._Booster__boost(grad, dr)
 
             if is_finished:
                 logger.info(f"Finished training after {idx} iterations.")
                 break
 
             # We recover the leaf indices of the current tree, avoiding (slow) call to
-            # self.booster.predict(X, pred_leaf=True). It's a bit of dark magic, but the
-            # speedup is worth it.
-            # leaves = self.booster.predict(
+            # self.booster_.predict(X, pred_leaf=True). It's a bit of dark magic, but
+            # the speedup is worth it.
+            # leaves = self.booster_.predict(
             #     X, start_iteration=idx, num_iteration=1, pred_leaf=True
             # ).flatten()
             leaf_values = []
             num_leaves = max_num_leaves
 
             # There exists no "booster.get_num_leafs(idx)" in LGBM. One could use
-            # num_leaves = self.booster.dump_model()["tree_info"][idx]["num_leaves"],
+            # num_leaves = self.booster_.dump_model()["tree_info"][idx]["num_leaves"],
             # but this is slow. The try-except loop below is faster.
             # Even though we catch the error, LightGBM prints to stderr somewhere in the
             # C-code. We catch and suppress this.
             for ldx in range(max_num_leaves):
                 try:
                     with _suppress_stderr():
-                        val = self.booster.get_leaf_output(idx, ldx)
+                        val = self.booster_.get_leaf_output(idx, ldx)
                     leaf_values.append(val)
                 except lgb.basic.LightGBMError:
                     num_leaves = ldx
@@ -290,8 +287,8 @@ class AnchorBooster:
             leaf_values = np.array(leaf_values, dtype=np.float64)
 
             # The _Booster__inner_predict(0) checks if __inner_predict_buffer[0] is None
-            self.booster._Booster__inner_predict_buffer = [None]
-            booster_preds_new = self.booster._Booster__inner_predict(0)
+            self.booster_._Booster__inner_predict_buffer = [None]
+            booster_preds_new = self.booster_._Booster__inner_predict(0)
 
             booster_preds_this_iter = booster_preds_new - booster_preds
             booster_preds = booster_preds_new
@@ -309,7 +306,7 @@ class AnchorBooster:
                     "LightGBM split a leaf with (almost) zero variance at iteration "
                     f"{idx}. Consider setting a nonzero `min_gain_to_split`."
                 )
-                leaves = self.booster.predict(
+                leaves = self.booster_.predict(
                     X, start_iteration=idx, num_iteration=1, pred_leaf=True
                 ).flatten()
             else:
@@ -371,9 +368,9 @@ class AnchorBooster:
             leaf_values = -np.linalg.solve(H, g) * self.params.get("learning_rate", 0.1)
 
             for ldx, val in enumerate(leaf_values):
-                self.booster.set_leaf_output(idx, ldx, val)
+                self.booster_.set_leaf_output(idx, ldx, val)
 
-            # Ensure f == self.init_score_ + self.booster.predict(X)
+            # Ensure f == self.init_score_ + self.booster_.predict(X)
             f += leaf_values[leaves]
 
         return self
@@ -392,13 +389,13 @@ class AnchorBooster:
         kwargs : dict
             Passed to ``lgb.Booster.predict``.
         """
-        if self.booster is None:
+        if not hasattr(self, "booster_"):
             raise ValueError("AnchorBooster has not yet been fitted.")
 
         if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
             X = X.to_arrow()
 
-        scores = self.booster.predict(X, raw_score=True, **kwargs)
+        scores = self.booster_.predict(X, raw_score=True, **kwargs)
 
         if self.objective == "binary" and not raw_score:
             return scipy.stats.norm.cdf(scores + self.init_score_)
@@ -417,11 +414,12 @@ class AnchorBooster:
         with respect to the leaf node values :math:`\\beta^{j+1}` of
         :math:`\\hat t^{j+1}(X)`.
         We set
-        :math:`\\hat \\beta^{j+1}_\\mathrm{refit} = \\mathrm{decay \\ rate} \\hat \\beta^{j+1}_\\mathrm{old} + (1 - \\mathrm{decay \\ rate}) \\hat \\beta^{j+1}_\\mathrm{new}`.
+        :math:`\\hat \\beta^{j+1}_\\mathrm{refit} = \\mathrm{decay \\ rate} \\cdot \\hat \\beta^{j+1}_\\mathrm{old} + (1 - \\mathrm{decay \\ rate}) \\cdot \\hat \\beta^{j+1}_\\mathrm{new}`.
         Refitting updates the tree's leaf values, but not their structure.
-        ``AnchorBooster.refit`` differs from ``lgbm.Booster.refit`` in that it supports
-        probit regression and leaf nodes with no samples from the new data are not
-        updated, instead of being shrunk towards zero (as in LightGBM).
+        ``AnchorBooster.refit`` differs from ``lgbm.Booster.refit`` by not reestimating
+        :math:`\\hat f^0_\\mathrm{refit}` from the new :math:`y`, supporting
+        probit regression, and by not updating leaf node values with no samples from the
+        new data, instead of shrinking them towards zero.
 
         Parameters
         ----------
@@ -432,7 +430,7 @@ class AnchorBooster:
         decay_rate : float
             The decay rate for the leaf values. Must be in [0, 1]. Default is 0. If 0,
             the leaf values are set to the new values. If 1, the leaf values are not
-            updated.
+            updated. This matches the behavior of LightGBM's ``refit`` method.
 
         Returns
         -------
@@ -447,7 +445,7 @@ class AnchorBooster:
         if self.objective == "binary":
             y_tilde = np.where(y == 1, 1, -1)
 
-        leaves = self.booster.predict(X, pred_leaf=True)
+        leaves = self.booster_.predict(X, pred_leaf=True)
         num_leaves = np.max(leaves, axis=0) + 1
 
         f = np.full(len(y), self.init_score_, dtype="float64")
@@ -483,11 +481,11 @@ class AnchorBooster:
             new_values = np.zeros(num_leaves[idx], dtype="float64")
 
             for ldx in np.where(n_obs > 0)[0]:
-                old_value = self.booster.get_leaf_output(idx, ldx)
+                old_value = self.booster_.get_leaf_output(idx, ldx)
                 new_values[ldx] = (
                     decay_rate * old_value + (1 - decay_rate) * values[ldx]
                 )
-                self.booster.set_leaf_output(idx, ldx, new_values[ldx])
+                self.booster_.set_leaf_output(idx, ldx, new_values[ldx])
 
             f += new_values[leaves[:, idx]]
 
