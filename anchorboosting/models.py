@@ -1,6 +1,7 @@
 import os
 import sys
 from contextlib import contextmanager
+from logging import getLogger
 
 import lightgbm as lgb
 import numpy as np
@@ -13,6 +14,8 @@ try:
 except ImportError:
     _POLARS_INSTALLED = False
 
+logger = getLogger(__name__)
+
 
 class AnchorBooster:
     """
@@ -23,7 +26,8 @@ class AnchorBooster:
 
     .. math:: \\ell(f, y) = \\frac{1}{2} \\| y - f \\|_2^2 + \\frac{1}{2} (\\gamma - 1) \\|P_A (y - f) \\|_2^2,
 
-    where :math:`P_A` is the projection onto the space spanned by the anchors :math:`A`.
+    where :math:`P_A = A (A^T A)^{-1} A^T` is the linear projection onto the anchor
+    :math:`A`'s column space .
 
     Let :math:`\\Phi` and :math:`\\varphi` be cumulative distribution function and
     probability density function of the Gaussian distribution.
@@ -32,14 +36,18 @@ class AnchorBooster:
 
     .. math:: \\ell(f, y) = - \\sum_{i=1}^n \\log( \\Phi(y_i f_i) ) + \\frac{1}{2} (\\gamma - 1) \\|P_A r \\|_2^2,
 
-    where :math:`r = - y \\varphi(f) / \\Phi(y f)` is the gradient of the probit loss with
-    respect to the scores :math:`f`.
+    where :math:`r = - y \\varphi(f) / \\Phi(y f)` is the gradient of the probit loss
+    :math:`- \\sum_{i=1}^n \\log( \\Phi(y_i f_i) )` with respect to the scores
+    :math:`f`. We use a probit link instead of logistic as the resulting anchor loss is
+    convex.
 
     We boost the anchor loss with LightGBM.
     Let :math:`\\hat f^j` be the boosted learner after :math:`j` steps of boosting, with
     :math:`\\hat f^0 = \\frac{1}{n} \\sum_{i=1}^n y_i` (regression) or
     :math:`\\hat f^0 = \\Phi^{-1}(\\frac{1}{n} \\sum_{i=1}^n y_i)` (binary classification).
-    We fit a decision tree :math:`\\hat t^{j+1} := - \\left. \\frac{\\mathrm{d}}{\\mathrm{d} f} \\ell(f, y) \\right|_{f = \\hat f^j(X)} \\sim X` to the anchor loss' negative gradient.
+    We fit a decision tree
+    :math:`\\hat t^{j+1} := - \\left. \\frac{\\mathrm{d}}{\\mathrm{d} f} \\ell(f, y) \\right|_{f = \\hat f^j(X)} \\sim X`
+    to the anchor loss' negative gradient.
     Let :math:`M \\in \\mathbb{R}^{n \\times \\mathrm{num. \\ leafs}}` be the one-hot encoding
     of :math:`\\hat t^{j+1}(X)`'s leaf node indices.
     Then
@@ -55,11 +63,14 @@ class AnchorBooster:
     .. math:: \\hat \\beta^{j+1} = - \\mathrm{lr} \\, \\cdot \\, \\left( M^T \\left.\\frac{\\mathrm{d}^2}{\\mathrm{d} f^2}\\ell(f, y)\\right|_{f = \\hat f^j(X)} M \\right)^{-1} M^T \\left.\\frac{\\mathrm{d}}{\\mathrm{d} f}\\ell(f, y)\\right|_{f = \\hat f^j(X)},
 
     where :math:`\\mathrm{lr}` is the learning rate, 0.1 by default.
-
     Finally, we set :math:`\\hat f^{j+1} = \\hat f^j + \\hat t^{j+1}`.
 
-    For best performance, set OMP_NUM_THREADS to the number of CPU cores available (not
-    threads) before training.
+    For optimal speed, set the environment variable ``OMP_NUM_THREADS`` to the number of
+    CPU cores available (not threads) before training. For performance, we recommend
+    reducing the tree's variance by restricting their maximum depth or number of leaves,
+    e.g., by setting ``max_depth=3``. Also, consider setting ``min_gain_to_split=0.1``
+    (or some other small, non-zero value) to keep LightGBM from splitting leaves with
+    zero variance.
 
     Parameters
     ----------
@@ -75,20 +86,20 @@ class AnchorBooster:
         The number of boosting iterations. Default is 100.
     objective: str, optional, default="regression"
         The objective function to use. Can be ``"regression"`` for regression or
-        ``"binary"`` for classification with a probit link function. If "binary", the
-        outcome values must be 0 or 1.
+        ``"binary"`` for classification with a probit link function. If ``"binary"``,
+        the outcome values must be 0 or 1.
     learning_rate: float, optional, default=0.1
         The learning rate for the boosting. This is the :math:`\\mathrm{lr}` in the
         second order optimization step. It controls the step size of the updates.
     **kwargs: dict
         Additional parameters for the LightGBM model. See LightGBM documentation for
         details. We suggest reducing the tree's complexity by reducing ``max_depth`` or
-        ``num_leaves``.
+        ``num_leaves`` and setting ``min_gain_to_split`` to a non-zero value.
 
     Attributes
     ----------
-    booster: lightgbm.Booster
-        The LightGBM booster object containing the trained model.
+    booster_: lightgbm.Booster
+        The LightGBM booster containing the trained model.
     init_score_: float
         The initial score used for the boosting. For regression, this is the mean of
         the outcome values. For binary classification, this is the inverse probit link
@@ -120,9 +131,6 @@ class AnchorBooster:
         self.dataset_params = dataset_params
         self.num_boost_round = num_boost_round
         self.objective = objective
-
-        self.booster = None
-        self.init_score_ = None
 
     def fit(
         self,
@@ -185,7 +193,7 @@ class AnchorBooster:
 
         data = lgb.Dataset(**dataset_params)
 
-        self.booster = lgb.Booster(params=self.params, train_set=data)
+        self.booster_ = lgb.Booster(params=self.params, train_set=data)
 
         f = np.ones(len(y), dtype=np.float64) * self.init_score_
         booster_preds = f.copy()
@@ -227,7 +235,7 @@ class AnchorBooster:
             grad = r + (self.gamma - 1) * r_proj * dr
 
             # We wish to fit one additional tree. Intuitively, one would use
-            # is_finished = self.booster.update(fobj=self.objective.objective)
+            # is_finished = self.booster_.update(fobj=self.objective.objective)
             # for this. This makes a call to self.__inner_predict(0) to get the current
             # predictions for all existing trees. See:
             # https://github.com/microsoft/LightGBM/blob/18c11f861118aa889b9d4579c2888d\
@@ -236,9 +244,9 @@ class AnchorBooster:
             # However, this cache is based on the "original" tree values, not the one
             # we set below. We thus use "our own" predictions and skip __inner_predict.
             # No idea what the set_objective_to_none does, but lgbm raises if we don't.
-            self.booster._Booster__inner_predict_buffer = None
-            if not self.booster._Booster__set_objective_to_none:
-                self.booster.reset_parameter(
+            self.booster_._Booster__inner_predict_buffer = None
+            if not self.booster_._Booster__set_objective_to_none:
+                self.booster_.reset_parameter(
                     {"objective": "none"}
                 )._Booster__set_objective_to_none = True
 
@@ -246,30 +254,30 @@ class AnchorBooster:
             # criteria. c.f. https://github.com/microsoft/LightGBM/pull/6890
             # The hessian is used only for the `min_hessian_in_leaf` parameter to
             # avoid numerical instabilities.
-            is_finished = self.booster._Booster__boost(grad, dr)
+            is_finished = self.booster_._Booster__boost(grad, dr)
 
             if is_finished:
-                print(f"Finished training after {idx} iterations.")
+                logger.info(f"Finished training after {idx} iterations.")
                 break
 
             # We recover the leaf indices of the current tree, avoiding (slow) call to
-            # self.booster.predict(X, pred_leaf=True). It's a bit of dark magic, but the
-            # speedup is worth it.
-            # leaves = self.booster.predict(
+            # self.booster_.predict(X, pred_leaf=True). It's a bit of dark magic, but
+            # the speedup is worth it.
+            # leaves = self.booster_.predict(
             #     X, start_iteration=idx, num_iteration=1, pred_leaf=True
             # ).flatten()
             leaf_values = []
             num_leaves = max_num_leaves
 
             # There exists no "booster.get_num_leafs(idx)" in LGBM. One could use
-            # num_leaves = self.booster.dump_model()["tree_info"][idx]["num_leaves"]
+            # num_leaves = self.booster_.dump_model()["tree_info"][idx]["num_leaves"],
             # but this is slow. The try-except loop below is faster.
             # Even though we catch the error, LightGBM prints to stderr somewhere in the
             # C-code. We catch and suppress this.
             for ldx in range(max_num_leaves):
                 try:
                     with _suppress_stderr():
-                        val = self.booster.get_leaf_output(idx, ldx)
+                        val = self.booster_.get_leaf_output(idx, ldx)
                     leaf_values.append(val)
                 except lgb.basic.LightGBMError:
                     num_leaves = ldx
@@ -278,8 +286,8 @@ class AnchorBooster:
             leaf_values = np.array(leaf_values, dtype=np.float64)
 
             # The _Booster__inner_predict(0) checks if __inner_predict_buffer[0] is None
-            self.booster._Booster__inner_predict_buffer = [None]
-            booster_preds_new = self.booster._Booster__inner_predict(0)
+            self.booster_._Booster__inner_predict_buffer = [None]
+            booster_preds_new = self.booster_._Booster__inner_predict(0)
 
             booster_preds_this_iter = booster_preds_new - booster_preds
             booster_preds = booster_preds_new
@@ -288,14 +296,27 @@ class AnchorBooster:
             leaf_values_sorted = leaf_values[leaf_values_argsort]
 
             tol = np.min(np.abs(np.diff(leaf_values_sorted))) * 0.1
-            # This finds indices i such that
-            # leaf_values[argsort][i-1] + tol < preds <= leaf_values[argsort][i] + tol.
-            leaves = np.searchsorted(
-                leaf_values_sorted + tol,
-                booster_preds_this_iter,
-                side="left",
-            )
-            leaves = leaf_values_argsort[leaves]
+            # If min_gain_to_split=0, LightGBM will split a leaf with zero variance
+            # (e.g., all same class in binary classification during first boosting
+            # iteration with f=const) into two leaves. Then, there are 2 leafs with
+            # exactly the same value and our approach above cannot differentiate them.
+            if tol < 1e-12:
+                logger.info(
+                    "LightGBM split a leaf with (almost) zero variance at iteration "
+                    f"{idx}. Consider increasing `min_gain_to_split`."
+                )
+                leaves = self.booster_.predict(
+                    X, start_iteration=idx, num_iteration=1, pred_leaf=True
+                ).flatten()
+            else:
+                # searchsorted finds indices i such that
+                # leaf_values_sorted[i-1] + tol < preds <=leaf_values_sorted[i] + tol.
+                leaves = np.searchsorted(
+                    leaf_values_sorted + tol,
+                    booster_preds_this_iter,
+                    side="left",
+                )
+                leaves = leaf_values_argsort[leaves]
 
             # We wish to do 2nd order updates in the leaves. Since the anchor regression
             # objective is quadratic, for regression a 2nd order update is equal to the
@@ -325,7 +346,8 @@ class AnchorBooster:
                 minlength=num_leaves,
             )
             counts += self.params.get("lambda_l2", 0)
-            counts[counts == 0] = 1
+            counts[counts == 0] = 1  # counts==0 should never happen.
+
             # Mdr^T P_Z Mdr = (Mdr^T Q) @ (Mdr^T Q)^T
             # One could also compute this using bincount, but it appears this
             # version using a sparse matrix is faster.
@@ -345,9 +367,9 @@ class AnchorBooster:
             leaf_values = -np.linalg.solve(H, g) * self.params.get("learning_rate", 0.1)
 
             for ldx, val in enumerate(leaf_values):
-                self.booster.set_leaf_output(idx, ldx, val)
+                self.booster_.set_leaf_output(idx, ldx, val)
 
-            # Ensure f == self.init_score_ + self.booster.predict(X)
+            # Ensure f == self.init_score_ + self.booster_.predict(X)
             f += leaf_values[leaves]
 
         return self
@@ -366,13 +388,13 @@ class AnchorBooster:
         kwargs : dict
             Passed to ``lgb.Booster.predict``.
         """
-        if self.booster is None:
-            raise ValueError("AnchorBoost has not yet been fitted.")
+        if not hasattr(self, "booster_"):
+            raise ValueError("AnchorBooster has not yet been fitted.")
 
         if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
             X = X.to_arrow()
 
-        scores = self.booster.predict(X, raw_score=True, **kwargs)
+        scores = self.booster_.predict(X, raw_score=True, **kwargs)
 
         if self.objective == "binary" and not raw_score:
             return scipy.stats.norm.cdf(scores + self.init_score_)
@@ -391,11 +413,12 @@ class AnchorBooster:
         with respect to the leaf node values :math:`\\beta^{j+1}` of
         :math:`\\hat t^{j+1}(X)`.
         We set
-        :math:`\\hat \\beta^{j+1}_\\mathrm{refit} = \\mathrm{decay \\ rate} \\hat \\beta^{j+1}_\\mathrm{old} + (1 - \\mathrm{decay \\ rate}) \\hat \\beta^{j+1}_\\mathrm{new}`.
+        :math:`\\hat \\beta^{j+1}_\\mathrm{refit} = \\mathrm{decay \\ rate} \\cdot \\hat \\beta^{j+1}_\\mathrm{old} + (1 - \\mathrm{decay \\ rate}) \\cdot \\hat \\beta^{j+1}_\\mathrm{new}`.
         Refitting updates the tree's leaf values, but not their structure.
-        ``AnchorBooster.refit`` differs from ``lgbm.Booster.refit`` in that it supports
-        probit regression and leaf nodes with no samples from the new data are not
-        updated, instead of being shrunk towards zero (as in LightGBM).
+        ``AnchorBooster.refit`` differs from ``lgbm.Booster.refit`` by not reestimating
+        :math:`\\hat f^0_\\mathrm{refit}` from the new :math:`y`, supporting
+        probit regression, and by not updating leaf node values with no samples from the
+        new data, instead of shrinking them towards zero.
 
         Parameters
         ----------
@@ -406,7 +429,7 @@ class AnchorBooster:
         decay_rate : float
             The decay rate for the leaf values. Must be in [0, 1]. Default is 0. If 0,
             the leaf values are set to the new values. If 1, the leaf values are not
-            updated.
+            updated. This matches the behavior of LightGBM's ``refit`` method.
 
         Returns
         -------
@@ -421,7 +444,7 @@ class AnchorBooster:
         if self.objective == "binary":
             y_tilde = np.where(y == 1, 1, -1)
 
-        leaves = self.booster.predict(X, pred_leaf=True)
+        leaves = self.booster_.predict(X, pred_leaf=True)
         num_leaves = np.max(leaves, axis=0) + 1
 
         f = np.full(len(y), self.init_score_, dtype="float64")
@@ -457,11 +480,11 @@ class AnchorBooster:
             new_values = np.zeros(num_leaves[idx], dtype="float64")
 
             for ldx in np.where(n_obs > 0)[0]:
-                old_value = self.booster.get_leaf_output(idx, ldx)
+                old_value = self.booster_.get_leaf_output(idx, ldx)
                 new_values[ldx] = (
                     decay_rate * old_value + (1 - decay_rate) * values[ldx]
                 )
-                self.booster.set_leaf_output(idx, ldx, new_values[ldx])
+                self.booster_.set_leaf_output(idx, ldx, new_values[ldx])
 
             f += new_values[leaves[:, idx]]
 
@@ -470,15 +493,14 @@ class AnchorBooster:
 
 @contextmanager
 def _suppress_stderr():
-    """ChatGPT wrote this for me."""
-    stderr_fd = sys.stderr.fileno()
-    old_stderr_fd = os.dup(stderr_fd)
+    stderr_fd = sys.stderr.fileno()  # 2
+    old_stderr_fd = os.dup(stderr_fd)  # keep to restore later
 
-    devnull_fd = os.open(os.devnull, os.O_RDWR)
+    devnull_fd = os.open(os.devnull, os.O_RDWR)  # open /dev/null for writing
 
     try:
-        os.dup2(devnull_fd, stderr_fd)  # redirect FD 2 → /dev/null
-        yield
+        os.dup2(devnull_fd, stderr_fd)  # redirect 2 → /dev/null
+        yield  # run my code
     finally:
         os.dup2(old_stderr_fd, stderr_fd)  # put the old stderr back
         os.close(old_stderr_fd)
