@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
+import scipy.sparse
 
-from anchorboosting.models import cached_proj
+from anchorboosting.models import Proj
 
 cases = [
     (
@@ -36,12 +37,31 @@ cases = [
 
 @pytest.mark.parametrize("Z, f, result", cases)
 def test_cached_proj_result(Z, f, result):
-    np.testing.assert_almost_equal(cached_proj(Z)(f), result)
+    np.testing.assert_almost_equal(Proj(Z)(f), result)
 
 
 @pytest.mark.parametrize("Z, f, _", cases)
 def test_cached_proj_dot_product(Z, f, _):
     np.testing.assert_almost_equal(
-        np.dot(cached_proj(Z)(f).T, f),
-        np.dot(cached_proj(Z)(f).T, cached_proj(Z)(f)),
+        np.dot(Proj(Z)(f).T, f),
+        np.dot(Proj(Z)(f).T, Proj(Z)(f)),
     )
+
+
+def test_proj_sandwich():
+    n = 100
+    num_categories = 10
+    num_leaves = 5
+    rng = np.random.RandomState(0)
+
+    Z = rng.choice(np.arange(num_categories), size=n, replace=True)
+    leaves = rng.choice(np.arange(num_leaves), size=n, replace=True)
+    f = rng.normal(size=n)
+
+    M = scipy.sparse.csr_matrix((f, (np.arange(n), leaves)), (n, num_leaves)).toarray()
+    proj = Proj(Z)
+
+    sandwich1 = proj.sandwich(leaves, num_leaves, f)
+    for ldx in range(num_leaves):
+        M[:, ldx] = proj(M[:, ldx])
+    np.testing.assert_almost_equal(sandwich1, M.T @ M)

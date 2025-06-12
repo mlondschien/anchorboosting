@@ -198,7 +198,7 @@ class AnchorBooster:
         f = np.ones(len(y), dtype=np.float64) * self.init_score_
         booster_preds = f.copy()
 
-        Q, _ = np.linalg.qr(Z, mode="reduced")  # P_Z f = Q @ (Q^T @ f)
+        proj = Proj(Z)
 
         if self.objective == "binary":
             y_tilde = np.where(y == 1, 1, -1).astype(np.float64)
@@ -231,7 +231,7 @@ class AnchorBooster:
                 dr = -f * r + r**2  # d^2/df^2 loss(f, y)
                 ddr = (f**2 - 1) * r - 3 * f * r**2 + 2 * r**3  # d^3/df^3 loss
 
-            r_proj = Q @ (Q.T @ r)
+            r_proj = proj(r)
             grad = r + (self.gamma - 1) * r_proj * dr
 
             # We wish to fit one additional tree. Intuitively, one would use
@@ -348,19 +348,7 @@ class AnchorBooster:
             counts += self.params.get("lambda_l2", 0)
             counts[counts == 0] = 1  # counts==0 should never happen.
 
-            # Mdr^T P_Z Mdr = (Mdr^T Q) @ (Mdr^T Q)^T
-            # One could also compute this using bincount, but it appears this
-            # version using a sparse matrix is faster.
-            Mdr = scipy.sparse.csr_matrix(
-                (
-                    dr,
-                    (np.arange(len(leaves)), leaves),
-                ),
-                shape=(len(leaves), num_leaves),
-                dtype=np.float64,
-            )
-            B = Mdr.T.dot(Q)
-            H = (self.gamma - 1) * B @ B.T
+            H = (self.gamma - 1) * proj.sandwich(leaves, num_leaves, weights=dr)
             H += np.diag(counts)
 
             # Compute the 2nd order update
@@ -507,58 +495,95 @@ def _suppress_stderr():
         os.close(devnull_fd)
 
 
-def cached_proj(Z):
+class Proj:
     """
-    Create a projection function that projects onto the subspace spanned by Z.
-
-    If ``Z`` is None, the projection function returns an array of zeros with the same
-    shape as the input.
-    If ``Z`` is a 1d array of integers, it is assumed to be categorical with values
-    0, 1, ..., n_categories-1. The projection is done by averaging the values of the
-    input within each category.
-    If ``Z`` is a 2d array of floats, this uses the QR decomposition to cache
-    computation. If ``Z = Q @ R``, then the projection of a vector `f` onto the
-    subspace spanned by `Z` is given by ``Q @ (Q^T @ f)``.
+    Cache the projection onto the subspace spanned by Z.
 
     Parameters
     ----------
     Z: np.ndarray of dimension (n, d_Z) or (n,), optional, default=None
         The `Z` matrix or 1d array of integers.
-
-    Returns
-    -------
-    proj: function
-        A function that takes an array `f` and returns the projection of `f` onto the
-        subspace spanned by `Z`.
     """
 
-    if Z is None:
+    def __init__(self, Z):
+        if Z is None:
+            self._type = "none"
 
-        def proj(f):
+        elif len(Z.shape) == 1 and np.issubdtype(Z.dtype, np.integer):
+            self._type = "categorical"
+            self._Z = Z
+            self._n_categories = np.max(Z) + 1
+            counts = np.bincount(Z, minlength=self._n_categories)
+            counts[counts == 0] = 1.0  # Avoid division by zero
+            self._one_over_counts = 1 / counts
+
+        elif len(Z.shape) == 2 and np.issubdtype(Z.dtype, np.floating):
+            self._type = "linear"
+            self._Q, _ = np.linalg.qr(Z, mode="reduced")
+        else:
+            raise ValueError(
+                "Z should be either a 1d array of integers or a 2d array of floats. "
+                f"Got shape {Z.shape} and dtype {Z.dtype}."
+            )
+
+    def __call__(self, f):
+        """
+        Project the input array `f` onto the subspace spanned by `Z`.
+
+        Parameters
+        ----------
+        f: np.ndarray of shape (n,)
+            The input array to project.
+
+        Returns
+        -------
+        np.ndarray of shape (n,)
+            The projected array.
+        """
+        if self._type == "none":
             return np.zeros_like(f)
 
-    elif len(Z.shape) == 1 and np.issubdtype(Z.dtype, np.integer):
-        n_categories = np.max(Z) + 1
+        elif self._type == "categorical":
+            sums = np.bincount(self._Z, weights=f, minlength=self._n_categories)
+            means = sums * self._one_over_counts
+            return means[self._Z]
 
-        def proj(f):
-            sums = np.bincount(Z, weights=f, minlength=n_categories)
-            counts = np.bincount(Z, minlength=n_categories)
+        elif self._type == "linear":
+            return self._Q @ (self._Q.T @ f)
 
-            with np.errstate(divide="ignore", invalid="ignore"):
-                means = np.divide(sums, counts, where=counts != 0)
+    def sandwich(self, leaves, num_leaves, weights):
+        """
+        For M = f * one_hot(leaves), return proj(Z, M).T @ proj(Z, M).
 
-            return means[Z]
+        Parameters
+        ----------
+        f: np.ndarray or scipy.sparse.csr_matrix of shape (n, d)
+            The input array to project.
 
-    elif len(Z.shape) == 2 and np.issubdtype(Z.dtype, np.floating):
-        Q, _ = np.linalg.qr(Z, mode="reduced")  # P_Z f = Q @ (Q^T @ f)
+        Returns
+        -------
+        np.ndarray of shape (d, d)
+            The sandwich product.
+        """
+        if self._type == "none":
+            return np.zeros((num_leaves, num_leaves), dtype=weights.dtype)
 
-        def proj(f):
-            return Q @ (Q.T @ f)
+        elif self._type == "categorical":
+            S = np.zeros((self._n_categories, num_leaves), dtype=weights.dtype)
+            np.add.at(S, (self._Z, leaves), weights)
+            return (S * self._one_over_counts[:, np.newaxis]).T @ S
 
-    else:
-        raise ValueError(
-            "Z should be either a 1d array of integers or a 2d array of floats. "
-            f"Got shape {Z.shape} and dtype {Z.dtype}."
-        )
-
-    return proj
+        elif self._type == "linear":
+            # M^T P_Z M = (M^T Q) @ (M^T Q)^T
+            # One could also compute this using bincount, but it appears this
+            # version using a sparse matrix is faster.
+            M = scipy.sparse.csr_matrix(
+                (
+                    weights,
+                    (np.arange(len(leaves)), leaves),
+                ),
+                shape=(len(leaves), num_leaves),
+                dtype=weights.dtype,
+            )
+            B = M.T @ self._Q
+            return B @ B.T
