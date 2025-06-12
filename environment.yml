@@ -9,7 +9,6 @@ dependencies:
   - lightgbm >=4.0.0
   - setuptools  # build
   - pip  # build
-  - scikit-learn  # tests
   - pytest-cov  # tests
   - pytest  # tests
   - polars  # tests
