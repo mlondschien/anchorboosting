@@ -553,11 +553,15 @@ class Proj:
 
     def sandwich(self, leaves, num_leaves, weights):
         """
-        For M = f * one_hot(leaves), return proj(Z, M).T @ proj(Z, M).
+        For M = weights * one_hot(leaves), return proj(Z, M).T @ proj(Z, M).
 
         Parameters
         ----------
-        f: np.ndarray or scipy.sparse.csr_matrix of shape (n, d)
+        leaves: np.ndarray of shape (n,)
+            The leaf indices for each sample in `f`. Integers in [0, num_leaves).
+        num_leaves: int
+            The number of leaves in the decision tree.
+        weights: np.ndarray of shape (n,)
             The input array to project.
 
         Returns
