@@ -345,6 +345,7 @@ class AnchorBooster:
             counts += self.params.get("lambda_l2", 0)
             counts[counts == 0] = 1  # counts==0 should never happen.
 
+            # (dr * M)^T P_Z (dr * M)
             H = (self.gamma - 1) * proj.sandwich(leaves, num_leaves, weights=dr)
             H += np.diag(counts)
 
