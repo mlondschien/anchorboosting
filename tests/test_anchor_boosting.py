@@ -3,19 +3,23 @@ import numpy as np
 import pytest
 import scipy
 
-from anchorboosting import AnchorBooster
+from anchorboosting.models import AnchorBooster, Proj
 from anchorboosting.simulate import f1, simulate
 
 
 @pytest.mark.parametrize("gamma", [1.0, 2.0, 100])
 @pytest.mark.parametrize("objective", ["regression", "binary"])
-def test_anchor_boosting_second_order(gamma, objective):
+@pytest.mark.parametrize("categorical_z", [True, False])
+def test_anchor_boosting_second_order(gamma, objective, categorical_z):
     learning_rate = 0.1
     num_leaves = 5
     n = 200
     num_boost_round = 10
 
     x, y, a = simulate(f1, n=n, shift=0, seed=0)
+    if categorical_z:
+        a = np.digitize(a[:, 0], bins=[-1, 0, 1, 2, 3])
+        assert np.issubdtype(a.dtype, np.integer)
 
     if objective == "binary":
         y = (y > 0).astype(int)
@@ -40,7 +44,7 @@ def test_anchor_boosting_second_order(gamma, objective):
 
     def regression_loss(leaf_values):
         residuals = y - f - leaf_values[leaves]
-        Pa_residuals = a @ np.linalg.solve(a.T @ a, a.T @ residuals)
+        Pa_residuals = Proj(a)(residuals)
         return np.sum(np.square(residuals)) + (gamma - 1) * residuals.T @ Pa_residuals
 
     def probit_loss(leaf_values):
@@ -49,7 +53,7 @@ def test_anchor_boosting_second_order(gamma, objective):
         dp = scipy.stats.norm.pdf(scores)
         losses = -np.log(np.where(y == 1, p, 1 - p))
         dl = np.where(y == 1, -dp / p, dp / (1 - p))
-        Pa_dl = a @ np.linalg.solve(a.T @ a, a.T @ dl)
+        Pa_dl = Proj(a)(dl)
         return np.sum(losses) + (gamma - 1) / 2 * dl.T @ Pa_dl
 
     if objective == "regression":
