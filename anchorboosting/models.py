@@ -161,9 +161,6 @@ class AnchorBooster:
         if self.objective != "regression" and not np.isin(y, [0, 1]).all():
             raise ValueError("For binary classification, y values must be in {0, 1}.")
 
-        if Z is None:
-            Z = np.zeros(shape=(len(y), 0), dtype=np.float64)
-
         y = y.flatten()
 
         if self.objective == "regression":
