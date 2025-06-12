@@ -162,7 +162,7 @@ class AnchorBooster:
             raise ValueError("For binary classification, y values must be in {0, 1}.")
 
         if Z is None:
-            Z = np.zeros(shape=(len(y), 0))
+            Z = np.zeros(shape=(len(y), 0), dtype=np.float64)
 
         y = y.flatten()
 
@@ -505,3 +505,60 @@ def _suppress_stderr():
         os.dup2(old_stderr_fd, stderr_fd)  # put the old stderr back
         os.close(old_stderr_fd)
         os.close(devnull_fd)
+
+
+def cached_proj(Z):
+    """
+    Create a projection function that projects onto the subspace spanned by Z.
+
+    If ``Z`` is None, the projection function returns an array of zeros with the same
+    shape as the input.
+    If ``Z`` is a 1d array of integers, it is assumed to be categorical with values
+    0, 1, ..., n_categories-1. The projection is done by averaging the values of the
+    input within each category.
+    If ``Z`` is a 2d array of floats, this uses the QR decomposition to cache
+    computation. If ``Z = Q @ R``, then the projection of a vector `f` onto the
+    subspace spanned by `Z` is given by ``Q @ (Q^T @ f)``.
+
+    Parameters
+    ----------
+    Z: np.ndarray of dimension (n, d_Z) or (n,), optional, default=None
+        The `Z` matrix or 1d array of integers.
+
+    Returns
+    -------
+    proj: function
+        A function that takes an array `f` and returns the projection of `f` onto the
+        subspace spanned by `Z`.
+    """
+
+    if Z is None:
+
+        def proj(f):
+            return np.zeros_like(f)
+
+    elif len(Z.shape) == 1 and np.issubdtype(Z.dtype, np.integer):
+        n_categories = np.max(Z) + 1
+
+        def proj(f):
+            sums = np.bincount(Z, weights=f, minlength=n_categories)
+            counts = np.bincount(Z, minlength=n_categories)
+
+            with np.errstate(divide="ignore", invalid="ignore"):
+                means = np.divide(sums, counts, where=counts != 0)
+
+            return means[Z]
+
+    elif len(Z.shape) == 2 and np.issubdtype(Z.dtype, np.floating):
+        Q, _ = np.linalg.qr(Z, mode="reduced")  # P_Z f = Q @ (Q^T @ f)
+
+        def proj(f):
+            return Q @ (Q.T @ f)
+
+    else:
+        raise ValueError(
+            "Z should be either a 1d array of integers or a 2d array of floats. "
+            f"Got shape {Z.shape} and dtype {Z.dtype}."
+        )
+
+    return proj
