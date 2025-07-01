@@ -1,0 +1,14 @@
+name: benchmarks
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python =3.12
+  - numpy
+  - lightgbm
+  - asv
+  - scikit-learn <=1.5.2  # https://github.com/microsoft/LightGBM/issues/6849
+  - polars
+  - pyarrow
+  - cffi  # https://github.com/microsoft/LightGBM/pull/6785
+  - libmambapy
