@@ -38,7 +38,7 @@ class AnchorBoosterBenchmark(Benchmark):
 
     name = "AnchorBooster"
     param_names = ["objective", "n", "num_boost_round", "max_depth"]
-    params = (["regression", "binary"], [10_000], [100], [3])
+    params = (["regression", "binary"], [100_000], [100], [3])
 
     def _setup_model(self, params):
         objective, _, num_boost_round, max_depth = params
@@ -61,7 +61,7 @@ class LGBMBenchmark(Benchmark):
 
     name = "LGBM Booster"
     param_names = ["objective", "n", "num_boost_round", "max_depth"]
-    params = (["regression", "binary"], [10_000], [100], [3])
+    params = (["regression", "binary"], [100_000], [100], [3])
 
     def _setup_model(self, params):
         objective, _, num_boost_round, max_depth = params
