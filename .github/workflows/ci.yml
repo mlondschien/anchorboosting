@@ -18,7 +18,13 @@ jobs:
         with:
           micromamba-version: 1.5.10-0
           environment-file: benchmarks/environment.yml
+          init-shell: bash
+          cache-downloads: true
     
+      - name: Install conda
+        shell: bash -l {0}
+        run: micromamba install -n base -c conda-forge conda
+  
       - name: Install repository
         run: python -m pip install --no-build-isolation --no-deps --disable-pip-version-check -e .
       - name: Run benchmarks
@@ -26,7 +32,7 @@ jobs:
         run: |
           asv machine --machine github --yes
           # asv run --machine github --python=same
-          asv continuous origin/main HEAD -e --factor 1.05 --machine github
+          asv continuous origin/main HEAD -e --factor 1.05 --machine github --python=same
 
   test:
     name: Unit tests - ${{ matrix.PYTHON_VERSION }}

@@ -6,7 +6,7 @@
     "repo": "..",
     "environment_type": "conda",
     "show_commit_url": "https://github.com/mlondschien/anchorboosting/commit/",
-    "pythons": ["3.12"],
+    "python": "same",
     "conda_channels": ["conda-forge"],
     "build_command": "",
     "install_command": "python -mpip install --no-deps .",
