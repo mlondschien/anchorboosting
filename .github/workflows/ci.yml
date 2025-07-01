@@ -21,9 +21,10 @@ jobs:
           init-shell: bash
           cache-downloads: true
     
-      - name: Install conda
+      - name: Install conda into root
         shell: bash -l {0}
-        run: micromamba install -n base -c conda-forge conda
+        run: |
+          micromamba install -y -p "${MAMBA_ROOT_PREFIX}" -c conda-forge conda
   
       - name: Install repository
         run: python -m pip install --no-build-isolation --no-deps --disable-pip-version-check -e .

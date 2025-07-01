@@ -3,7 +3,7 @@
     "branches": ["main"],
     "project": "anchorboosting",
     "project_url": "https://github.com/mlondschien/anchorboosting",
-    "repo": "..",
+    "repo": ".",
     "environment_type": "conda",
     "show_commit_url": "https://github.com/mlondschien/anchorboosting/commit/",
     "python": "same",
