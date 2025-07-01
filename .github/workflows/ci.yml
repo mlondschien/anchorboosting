@@ -8,6 +8,28 @@ name: CI
 
 jobs:
 
+  asv-bench:
+    name: ASV Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up micromamba
+        uses: mamba-org/setup-micromamba@d05808540d968a55ca33c798e0661fb98f533c73
+        with:
+          micromamba-version: 1.5.10-0
+          environment-file: benchmarks/environment.yml
+    
+      - name: Install repository
+        run: python -m pip install --no-build-isolation --no-deps --disable-pip-version-check -e .
+      - name: Run benchmarks
+        shell: bash -l {0}
+        run: |
+          asv machine --machine github --yes
+          asv run --machine github --python=same
+          # asv continuous origin/main HEAD -e --factor 1.05 --machine github
+
   test:
     name: Unit tests - ${{ matrix.PYTHON_VERSION }}
     runs-on: ubuntu-latest
