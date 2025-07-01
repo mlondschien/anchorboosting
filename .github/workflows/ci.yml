@@ -28,7 +28,7 @@ jobs:
         run: |
           asv machine --machine github --yes
           # asv run --machine github --python=same
-          asv continuous origin/main HEAD -e --factor 1.05 --machine github --python=same
+          asv continuous origin/main HEAD -e --factor 1.05 --machine github
 
   test:
     name: Unit tests - ${{ matrix.PYTHON_VERSION }}
