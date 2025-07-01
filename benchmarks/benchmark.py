@@ -1,10 +1,10 @@
-import numpy as np
-from anchorboosting import AnchorBooster
-from lightgbm import LGBMModel
-
 import timeit
 from abc import ABC, abstractmethod
 from typing import Any
+
+from lightgbm import LGBMModel
+
+from anchorboosting import AnchorBooster
 
 from .load import load_nyc_taxi
 
@@ -13,7 +13,7 @@ class Benchmark(ABC):
     # Measure wall time instead of CPU usage
     timer = timeit.default_timer
 
-    name = None
+    name = ""
 
     params: Any
     param_names: Any
@@ -30,6 +30,7 @@ class Benchmark(ABC):
     @abstractmethod  # Required for asv to skip.
     def _setup_model(self, params):
         pass
+
 
 class AnchorBoosterBenchmark(Benchmark):
     def __init__(self, n_jobs=2):
@@ -53,6 +54,7 @@ class AnchorBoosterBenchmark(Benchmark):
         y = self.y_binary if self.model.objective == "binary" else self.y
         self.model.fit(self.X, y, self.Z)
 
+
 class LGBMBenchmark(Benchmark):
     def __init__(self, n_jobs=2):
         self.n_jobs = n_jobs  # GitHub CI has two nodes.
@@ -69,7 +71,7 @@ class LGBMBenchmark(Benchmark):
             objective=objective,
             n_jobs=self.n_jobs,
         )
-    
+
     def time_fit(self, *args):
         y = self.y_binary if self.model.objective == "binary" else self.y
         self.model.fit(self.X, y)

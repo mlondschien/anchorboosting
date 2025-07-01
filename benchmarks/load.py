@@ -1,14 +1,9 @@
 # From https://github.com/xhochy/nyc-taxi-fare-prediction-deployment-example
 from pathlib import Path
 
-import numpy as np
 import polars as pl
-from sklearn.compose import make_column_transformer
-from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import FunctionTransformer, OneHotEncoder
-from sklearn.preprocessing import OrdinalEncoder
 from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OrdinalEncoder
 
 DATA_PATH = Path(__file__).resolve().parent / "data"
 NYC_TAXI_DATASET_PATH = DATA_PATH / "nyc_taxi_data.parquet"
@@ -36,29 +31,33 @@ def load_nyc_taxi_burrows():
         df.write_parquet(NYC_TAXI_BURROWS_PATH)
         return df
 
+
 def load_nyc_taxi(n):
     df = load_nyc_taxi_raw().head(n)
 
     burrows = load_nyc_taxi_burrows()
 
-    df = df.filter(
-        pl.col("total_amount").is_not_null() & pl.col("total_amount").gt(0)
-    ).join(
-        burrows.with_columns(pl.col("Borough").alias("pickup_borough")),
-        left_on="PULocationID",
-        right_on="LocationID",
-        how="left",
-    ).join(
-        burrows.with_columns(pl.col("Borough").alias("dropoff_borough")),
-        left_on="DOLocationID",
-        right_on="LocationID",
-        how="left",
-    ).with_columns(
-        pl.col("total_amount").log().alias("total_amount_log"),
-        pl.col("tpep_pickup_datetime").dt.weekday().alias("pickup_weekday"),
-        pl.col("tpep_pickup_datetime").dt.hour().alias("pickup_hour"),
-        pl.col("tpep_pickup_datetime").dt.minute().alias("pickup_minute"),
-        pl.col("pickup_borough").fill_null("Unknown").alias("pickup_borough"),
+    df = (
+        df.filter(pl.col("total_amount").is_not_null() & pl.col("total_amount").gt(0))
+        .join(
+            burrows.with_columns(pl.col("Borough").alias("pickup_borough")),
+            left_on="PULocationID",
+            right_on="LocationID",
+            how="left",
+        )
+        .join(
+            burrows.with_columns(pl.col("Borough").alias("dropoff_borough")),
+            left_on="DOLocationID",
+            right_on="LocationID",
+            how="left",
+        )
+        .with_columns(
+            pl.col("total_amount").log().alias("total_amount_log"),
+            pl.col("tpep_pickup_datetime").dt.weekday().alias("pickup_weekday"),
+            pl.col("tpep_pickup_datetime").dt.hour().alias("pickup_hour"),
+            pl.col("tpep_pickup_datetime").dt.minute().alias("pickup_minute"),
+            pl.col("pickup_borough").fill_null("Unknown").alias("pickup_borough"),
+        )
     )
 
     continuous_columns = [
@@ -73,7 +72,7 @@ def load_nyc_taxi(n):
         "pickup_hour",
         "pickup_minute",
     ]
-    df = df.with_columns(    pl.col(c).cast(pl.Float64) for c in continuous_columns)
+    df = df.with_columns(pl.col(c).cast(pl.Float64) for c in continuous_columns)
 
     ordinal_columns = [
         "VendorID",
@@ -87,7 +86,7 @@ def load_nyc_taxi(n):
         "pickup_borough",
         "dropoff_borough",
     ]
-    
+
     preprocessor = ColumnTransformer(
         transformers=[
             ("continuous", "passthrough", continuous_columns),
