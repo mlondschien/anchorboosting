@@ -435,7 +435,8 @@ class AnchorBooster:
 
         f = np.full(len(y), self.init_score_, dtype="float64")
 
-        for idx in range(self.num_boost_round):
+        # The model might have stopped boosting prematurely.
+        for idx in range(leaves.shape[1]):
             n_obs = np.bincount(leaves[:, idx], minlength=num_leaves[idx])
 
             if self.objective == "regression":

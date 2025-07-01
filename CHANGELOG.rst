@@ -1,6 +1,11 @@
 Changelog
 =========
 
+0.2.1 (2025-07-01)
+------------------
+
+- `AnchorBooster.refit` no longer raises an error if the model stopped boosting early during initial training.
+
 0.2.0 (2025-06-12)
 ------------------
 
