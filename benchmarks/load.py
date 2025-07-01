@@ -105,6 +105,6 @@ def load_nyc_taxi(n):
     y_binary = (y > y.mean()).astype(int)
 
     X = preprocessor.fit_transform(df)
-    Z = X.select("categorical__VendorID").to_numpy().astype("int32").ravel()
+    Z = X.select("categorical__Zone").to_numpy().astype("int32").ravel()
 
-    return X.drop("categorical__VendorID"), Z, y, y_binary
+    return X.drop("categorical__Zone"), Z, y, y_binary
