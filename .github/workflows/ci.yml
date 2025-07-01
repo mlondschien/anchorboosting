@@ -13,8 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - name: Set up micromamba
         uses: mamba-org/setup-micromamba@d05808540d968a55ca33c798e0661fb98f533c73
         with:
