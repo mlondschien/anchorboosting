@@ -30,7 +30,7 @@ API Reference
    :maxdepth: 1
    :caption: Other
 
-   GitHub <https://github.com/mlondschien/ivmodels>
+   GitHub <https://github.com/mlondschien/anchorboosting>
    changelog
 
 
