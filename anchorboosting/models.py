@@ -175,6 +175,8 @@ class AnchorBooster:
 
         if hasattr(X, "columns"):
             feature_name = X.columns
+        else:
+            feature_name = None
 
         if _POLARS_INSTALLED and isinstance(X, pl.DataFrame):
             X = X.to_arrow()
