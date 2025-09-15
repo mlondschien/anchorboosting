@@ -145,14 +145,17 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
         {"lambda_l2": 0.1},
     ],
 )
-@pytest.mark.parametrize("input_dtype", ["polars", "numpy"])
+@pytest.mark.parametrize("input_dtype", ["polars", "numpy", "pandas"])
 def test_compare_anchor_boosting_to_lgbm(parameters, input_dtype):
     X, y, a = simulate(f1, shift=0, seed=0, return_dtype=input_dtype)
 
     if input_dtype == "polars":
         X_arrow = X.to_arrow()
         categorical_feature = ["x3"]
-    else:
+    elif input_dtype == "pandas":
+        X_arrow = X
+        categorical_feature = ["x3"]
+    elif input_dtype == "numpy":
         X_arrow = X
         categorical_feature = [2]
 
@@ -190,26 +193,36 @@ def test_compare_anchor_boosting_to_lgbm(parameters, input_dtype):
     assert not np.allclose(lgbm_pred, anchor_booster_noncat_pred)
 
 
-def test_compare_input_types():
+@pytest.mark.parametrize("gamma", [1, 10])
+def test_compare_input_types(gamma):
     X_polars, y_polars, a_polars = simulate(f1, shift=0, seed=0, return_dtype="polars")
     X_numpy, y_numpy, a_numpy = simulate(f1, shift=0, seed=0, return_dtype="numpy")
+    X_pandas, y_pandas, a_pandas = simulate(f1, shift=0, seed=0, return_dtype="pandas")
 
     model_polars = AnchorBooster(
-        gamma=1,
+        gamma=gamma,
         num_boost_round=10,
         objective="regression",
     ).fit(X_polars, y_polars, Z=a_polars)
 
     model_numpy = AnchorBooster(
-        gamma=1,
+        gamma=gamma,
         num_boost_round=10,
         objective="regression",
     ).fit(X_numpy, y_numpy, Z=a_numpy)
 
+    model_pandas = AnchorBooster(
+        gamma=gamma,
+        num_boost_round=10,
+        objective="regression",
+    ).fit(X_pandas, y_pandas, Z=a_pandas)
+
+    pred_pandas = model_pandas.predict(X_pandas)
     pred_polars = model_polars.predict(X_polars)
     pred_numpy = model_numpy.predict(X_numpy)
 
     np.testing.assert_allclose(pred_polars, pred_numpy, rtol=1e-5)
+    np.testing.assert_allclose(pred_polars, pred_pandas, rtol=1e-5)
 
 
 @pytest.mark.parametrize("objective", ["regression", "binary"])

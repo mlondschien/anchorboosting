@@ -27,6 +27,10 @@ def simulate(f, n=100, shift=0, seed=0, return_dtype="polars"):
         df = df.to_numpy()
         a = a.astype(np.float32)
         y = y.astype(np.float32)
+    elif return_dtype == "pandas":
+        df = df.to_pandas()
+        a = a.astype(np.float32)
+        y = y.astype(np.float32)
 
     return df, y, a
 

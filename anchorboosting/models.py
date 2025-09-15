@@ -174,7 +174,7 @@ class AnchorBooster:
             )
 
         if hasattr(X, "columns"):
-            feature_name = X.columns
+            feature_name = list(X.columns)
         else:
             feature_name = None
 
