@@ -2,7 +2,7 @@ import numpy as np
 import polars as pl
 
 
-def simulate(f, n=100, shift=0, seed=0):
+def simulate(f, n=100, shift=0, seed=0, return_dtype="polars"):
     rng = np.random.RandomState(seed)
 
     p = 3
@@ -22,6 +22,15 @@ def simulate(f, n=100, shift=0, seed=0):
         {"x1": x[:, 0], "x2": x[:, 1], "x3": x3},
         schema={"x1": pl.Float64, "x2": pl.Float64, "x3": pl.Int64},
     )
+
+    if return_dtype == "numpy":
+        df = df.to_numpy()
+        a = a.astype(np.float32)
+        y = y.astype(np.float32)
+    elif return_dtype == "pandas":
+        df = df.to_pandas()
+        a = a.astype(np.float32)
+        y = y.astype(np.float32)
 
     return df, y, a
 

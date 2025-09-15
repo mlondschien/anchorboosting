@@ -10,13 +10,14 @@ from anchorboosting.simulate import f1, simulate
 @pytest.mark.parametrize("gamma", [1.0, 2.0, 100])
 @pytest.mark.parametrize("objective", ["regression", "binary"])
 @pytest.mark.parametrize("categorical_z", [True, False])
-def test_anchor_boosting_second_order(gamma, objective, categorical_z):
+@pytest.mark.parametrize("input_dtype", ["polars", "numpy"])
+def test_anchor_boosting_second_order(gamma, objective, categorical_z, input_dtype):
     learning_rate = 0.1
     num_leaves = 5
     n = 200
     num_boost_round = 10
 
-    x, y, a = simulate(f1, n=n, shift=0, seed=0)
+    x, y, a = simulate(f1, n=n, shift=0, seed=0, return_dtype=input_dtype)
     if categorical_z:
         a = np.digitize(a[:, 0], bins=[-1, 0, 1, 2, 3])
         assert np.issubdtype(a.dtype, np.integer)
@@ -36,7 +37,7 @@ def test_anchor_boosting_second_order(gamma, objective, categorical_z):
     f = model.predict(x, num_iteration=num_boost_round - 1, raw_score=True)
 
     leaves = model.booster_.predict(
-        x.to_arrow(),
+        x.to_arrow() if hasattr(x, "to_arrow") else x,
         pred_leaf=True,
         start_iteration=num_boost_round - 1,
         num_iteration=1,
@@ -144,8 +145,19 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
         {"lambda_l2": 0.1},
     ],
 )
-def test_compare_anchor_boosting_to_lgbm(parameters):
-    X, y, a = simulate(f1, shift=0, seed=0)
+@pytest.mark.parametrize("input_dtype", ["polars", "numpy", "pandas"])
+def test_compare_anchor_boosting_to_lgbm(parameters, input_dtype):
+    X, y, a = simulate(f1, shift=0, seed=0, return_dtype=input_dtype)
+
+    if input_dtype == "polars":
+        X_arrow = X.to_arrow()
+        categorical_feature = ["x3"]
+    elif input_dtype == "pandas":
+        X_arrow = X
+        categorical_feature = ["x3"]
+    elif input_dtype == "numpy":
+        X_arrow = X
+        categorical_feature = [2]
 
     lgbm_model = lgb.train(
         params={
@@ -153,7 +165,7 @@ def test_compare_anchor_boosting_to_lgbm(parameters):
             "objective": "regression",
             **parameters,
         },
-        train_set=lgb.Dataset(X.to_arrow(), y, categorical_feature=[2]),
+        train_set=lgb.Dataset(X_arrow, y, categorical_feature=[2]),
         num_boost_round=50,
     )
 
@@ -163,7 +175,7 @@ def test_compare_anchor_boosting_to_lgbm(parameters):
         objective="regression",
         learning_rate=0.1,
         **parameters,
-    ).fit(X, y, Z=a, categorical_feature=["x3"])
+    ).fit(X, y, Z=a, categorical_feature=categorical_feature)
 
     anchor_booster_noncat = AnchorBooster(
         gamma=1,
@@ -173,12 +185,44 @@ def test_compare_anchor_boosting_to_lgbm(parameters):
         **parameters,
     ).fit(X, y, Z=a)
 
-    lgbm_pred = lgbm_model.predict(X.to_arrow())
+    lgbm_pred = lgbm_model.predict(X_arrow)
     anchor_booster_pred = anchor_booster.predict(X)
     anchor_booster_noncat_pred = anchor_booster_noncat.predict(X)
 
     np.testing.assert_allclose(lgbm_pred, anchor_booster_pred, rtol=1e-5)
     assert not np.allclose(lgbm_pred, anchor_booster_noncat_pred)
+
+
+@pytest.mark.parametrize("gamma", [1, 10])
+def test_compare_input_types(gamma):
+    X_polars, y_polars, a_polars = simulate(f1, shift=0, seed=0, return_dtype="polars")
+    X_numpy, y_numpy, a_numpy = simulate(f1, shift=0, seed=0, return_dtype="numpy")
+    X_pandas, y_pandas, a_pandas = simulate(f1, shift=0, seed=0, return_dtype="pandas")
+
+    model_polars = AnchorBooster(
+        gamma=gamma,
+        num_boost_round=10,
+        objective="regression",
+    ).fit(X_polars, y_polars, Z=a_polars)
+
+    model_numpy = AnchorBooster(
+        gamma=gamma,
+        num_boost_round=10,
+        objective="regression",
+    ).fit(X_numpy, y_numpy, Z=a_numpy)
+
+    model_pandas = AnchorBooster(
+        gamma=gamma,
+        num_boost_round=10,
+        objective="regression",
+    ).fit(X_pandas, y_pandas, Z=a_pandas)
+
+    pred_pandas = model_pandas.predict(X_pandas)
+    pred_polars = model_polars.predict(X_polars)
+    pred_numpy = model_numpy.predict(X_numpy)
+
+    np.testing.assert_allclose(pred_polars, pred_numpy, rtol=1e-5)
+    np.testing.assert_allclose(pred_polars, pred_pandas, rtol=1e-5)
 
 
 @pytest.mark.parametrize("objective", ["regression", "binary"])

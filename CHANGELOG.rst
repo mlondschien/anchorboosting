@@ -1,6 +1,12 @@
 Changelog
 =========
 
+0.3.0 (2025-09-15)
+------------------
+
+- Fixed handling of feature names for numpy input in `AnchorBooster`.
+- Added support for pandas DataFrame input in `AnchorBooster`.
+
 0.2.1 (2025-07-01)
 ------------------
 
