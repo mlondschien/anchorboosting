@@ -9,9 +9,10 @@ from anchorboosting.simulate import f1, f2, simulate
 @pytest.mark.parametrize("seed", [0, 1])
 @pytest.mark.parametrize("fun", [f1, f2])
 @pytest.mark.parametrize("objective", ["regression", "binary"])
-def test_refit(objective, seed, fun):
+@pytest.mark.parametrize("input_dtype", ["numpy", "pandas", "polars"])
+def test_refit(objective, seed, fun, input_dtype):
 
-    X, y, a = simulate(fun, shift=0, seed=seed)
+    X, y, a = simulate(fun, shift=0, seed=seed, return_dtype=input_dtype)
 
     if objective == "binary":
         y = (y > 0).astype(int)
