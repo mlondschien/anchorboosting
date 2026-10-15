@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 from scipy.optimize import approx_fprime
+from scipy.special import log_ndtr, ndtr
 
 from anchorboosting import AnchorBooster
 from anchorboosting.models import Proj
@@ -149,9 +150,99 @@ def test_invalid_alpha(alpha):
         AnchorBooster(gamma=1, alpha_cvar=alpha).fit(X, y, Z)
 
 
-def test_unsupported_inputs():
+@pytest.mark.parametrize("objective", ["regression", "binary"])
+def test_missing_anchors(objective):
     X, y, Z = sample()
-    with pytest.raises(ValueError, match="regression with supplied anchors"):
-        AnchorBooster(gamma=1, alpha_cvar=0.1).fit(X, y)
-    with pytest.raises(ValueError, match="regression with supplied anchors"):
-        AnchorBooster(gamma=1, alpha_cvar=0.1, objective="binary").fit(X, y > 0, Z)
+    with pytest.raises(ValueError, match="requires supplied anchors"):
+        AnchorBooster(gamma=1, alpha_cvar=0.1, objective=objective).fit(X, y > 0)
+
+
+@pytest.mark.parametrize("gamma", [0, 0.5, np.nan, np.inf])
+@pytest.mark.parametrize("alpha", [1, 0.2])
+def test_invalid_probit_gamma(gamma, alpha):
+    X, y, Z = sample()
+    with pytest.raises(ValueError, match="gamma >= 1"):
+        AnchorBooster(gamma, objective="binary", alpha_cvar=alpha).fit(X, y > 0, Z)
+
+
+@pytest.mark.parametrize("categorical", [True, False])
+@pytest.mark.parametrize("alpha", [1, 0.3, 0.001])
+def test_probit_cvar_leaf_derivatives(monkeypatch, categorical, alpha):
+    X, y, Z = sample()
+    y = y > np.median(y)
+    if not categorical:
+        Z = np.column_stack([np.ones(len(y)), X])
+    gamma, rate = 3, 0.05
+    systems = []
+    lstsq = np.linalg.lstsq
+
+    def record(H, g, **kwargs):
+        systems.append((H.copy(), g.copy()))
+        return lstsq(H, g, **kwargs)
+
+    monkeypatch.setattr(np.linalg, "lstsq", record)
+    model = AnchorBooster(
+        gamma,
+        objective="binary",
+        alpha_cvar=alpha,
+        num_boost_round=3,
+        learning_rate=rate,
+        num_leaves=4,
+        min_gain_to_split=0.01,
+        num_threads=1,
+        verbosity=-1,
+    ).fit(X, y, Z)
+    assert len(systems) == model.booster_.num_trees() == 3
+    proj = Proj(Z)
+    signs = 2 * y.astype(float) - 1
+    f = np.full(len(y), model.init_score_)
+    for idx, (H, g) in enumerate(systems):
+        leaves = model.booster_.predict(
+            X, pred_leaf=True, start_iteration=idx, num_iteration=1
+        ).ravel()
+
+        def loss(values):
+            prediction = f + values[leaves]
+            log_probability = log_ndtr(signs * prediction)
+            score = -signs * np.exp(
+                -0.5 * prediction**2 - 0.5 * np.log(2 * np.pi) - log_probability
+            )
+            projected = proj(score) ** 2
+            q = cvar_density(projected, np.full(len(y), 1 / len(y)), alpha)
+            return -log_probability.sum() + (gamma - 1) / 2 * (q @ projected)
+
+        h = 2e-4
+        steps = np.eye(len(g)) * h
+        numerical_g = [(loss(d) - loss(-d)) / (2 * h) for d in steps]
+        numerical_H = [
+            [
+                (loss(a + b) - loss(a - b) - loss(-a + b) + loss(-a - b)) / (4 * h**2)
+                for b in steps
+            ]
+            for a in steps
+        ]
+        assert_allclose(g, numerical_g, atol=2e-5, rtol=1e-5)
+        assert_allclose(H, numerical_H, atol=2e-4, rtol=1e-5)
+        values = np.array(
+            [model.booster_.get_leaf_output(idx, leaf) for leaf in range(len(g))]
+        )
+        f += values[leaves]
+    assert_allclose(model.predict(X, raw_score=True), f)
+    assert_allclose(model.predict(X), ndtr(f))
+
+
+@pytest.mark.parametrize("alpha", [0.5, 0.2, 0.001])
+def test_probit_gamma_one_ignores_alpha(alpha):
+    X, y, Z = sample()
+    parameters = dict(
+        gamma=1,
+        objective="binary",
+        num_boost_round=5,
+        num_leaves=4,
+        min_gain_to_split=0.01,
+        num_threads=1,
+        verbosity=-1,
+    )
+    ordinary = AnchorBooster(**parameters).fit(X, y > 0, Z)
+    cvar = AnchorBooster(alpha_cvar=alpha, **parameters).fit(X, y > 0, Z)
+    assert_allclose(ordinary.predict(X), cvar.predict(X), atol=0, rtol=0)

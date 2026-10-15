@@ -32,14 +32,13 @@ class AnchorBooster:
     Let :math:`\\Phi` and :math:`\\varphi` be cumulative distribution function and
     probability density function of the Gaussian distribution.
     For binary classification with :math:`y \\in \\{-1, 1\\}` and a probit link
-    function, the anchor loss :cite:p:`kook2022distributional` is
+    function, the CVaR extension of :cite:p:`kook2022distributional` is
 
-    .. math:: \\ell(f, y) = - \\sum_{i=1}^n \\log( \\Phi(y_i f_i) ) + \\frac{1}{2} (\\gamma - 1) \\|P_A r \\|_2^2,
+    .. math:: \\ell(f, y) = - \\frac{1}{n} \\sum_{i=1}^n \\log( \\Phi(y_i f_i) ) + \\frac{1}{2} (\\gamma - 1) \\operatorname{CVaR}_{\\alpha}((P_A r)^2),
 
     where :math:`r = - y \\varphi(f) / \\Phi(y f)` is the gradient of the probit loss
     :math:`- \\sum_{i=1}^n \\log( \\Phi(y_i f_i) )` with respect to the scores
-    :math:`f`. We use a probit link instead of logistic as the resulting anchor loss is
-    convex.
+    :math:`f`. The penalty requires :math:`\\gamma \\geq 1`.
 
     We boost the anchor loss with LightGBM.
     Let :math:`\\hat f^j` be the boosted learner after :math:`j` steps of boosting, with
@@ -76,8 +75,8 @@ class AnchorBooster:
     ----------
     gamma: float
         The :math:`\\gamma` parameter for the anchor objective function. Must be
-        non-negative. If 1 and ``alpha_cvar=1``, this is standard regression or
-        probit classification.
+        non-negative for regression and at least 1 for probit classification.
+        If 1, probit is unpenalized; regression also requires ``alpha_cvar=1``.
         Larger values correspond to more causal regularization.
     dataset_params: dict or None
         The parameters for the LightGBM dataset. See LightGBM documentation for details.
@@ -164,8 +163,12 @@ class AnchorBooster:
         """
         if not 0 < self.alpha_cvar <= 1:
             raise ValueError("alpha_cvar must be in (0, 1].")
-        if self.alpha_cvar < 1 and (self.objective != "regression" or Z is None):
-            raise ValueError("CVaR requires regression with supplied anchors.")
+        if self.alpha_cvar < 1 and Z is None:
+            raise ValueError("CVaR requires supplied anchors.")
+        if self.objective == "binary" and (
+            not np.isfinite(self.gamma) or self.gamma < 1
+        ):
+            raise ValueError("Probit requires finite gamma >= 1.")
         if self.objective != "regression" and not np.isin(y, [0, 1]).all():
             raise ValueError("For binary classification, y values must be in {0, 1}.")
 
@@ -173,9 +176,11 @@ class AnchorBooster:
 
         if self.objective == "regression":
             self.init_score_ = np.mean(y)
+            scale, offset = self.gamma, 1
         elif self.objective == "binary":
             y_mean = np.clip(np.mean(y), 1 / len(y), 1 - 1 / len(y))
             self.init_score_ = scipy.stats.norm.ppf(y_mean)
+            scale, offset = self.gamma - 1, 0
         else:
             raise ValueError(
                 f"Objective must be 'regression' or 'binary'. Got {self.objective}."
@@ -240,6 +245,7 @@ class AnchorBooster:
 
             r_proj = proj(r)
 
+            q = 1
             if self.alpha_cvar < 1:
                 scores = r_proj**2
                 cutoff = np.quantile(scores, 1 - self.alpha_cvar, method="inverted_cdf")
@@ -249,10 +255,11 @@ class AnchorBooster:
                 q[ties] = np.clip(
                     (len(y) - q.sum()) / ties.sum(), 0, 1 / self.alpha_cvar
                 )
-                r_weighted = proj((self.gamma * q - 1) * r_proj)
-            else:
-                q = 1
-                r_weighted = (self.gamma - 1) * r_proj
+
+            weights = scale * q - offset
+            r_weighted = weights * r_proj
+            if self.alpha_cvar and proj._type == "linear":
+                r_weighted = proj(r_weighted)
 
             grad = r + r_weighted * dr
 
@@ -349,11 +356,11 @@ class AnchorBooster:
             # r = d/df loss(f, y)
             # dr = d^2/df^2 loss(f, y)
             # ddr = d^3/df^3 loss(f, y)
-            # The anchor loss is
-            # L = loss(f, y) + (gamma - 1) / 2 * || P_Z r ||^2
-            # d/df L = d/df loss(f, y) + (gamma - 1) P_Z r * dr
-            # d^2/df^2 L = diag(d^2/df^2 loss(f, y)) + (gamma - 1) diag(P_Z r * ddr)
-            #            + (gamma - 1) diag(dr) P_Z diag(dr)
+            # For fixed q, with W = diag(weights), the penalized loss is
+            # L = loss(f, y) + 1/2 * (P_Z r)^T W (P_Z r)
+            # d/df L = r + r_weighted * dr, where r_weighted = P_Z W P_Z r
+            # d^2/df^2 L = diag(dr + r_weighted * ddr)
+            #            + diag(dr) P_Z W P_Z diag(dr)
             #
             # We do the 2nd order update
             # beta = - (M^T [d^2/df^2 L] M)^{-1} M^T [d/df L]
@@ -370,8 +377,8 @@ class AnchorBooster:
             counts += self.params.get("lambda_l2", 0)
             counts[counts == 0] = 1  # counts==0 should never happen.
 
-            # (dr * M)^T P_Z diag(gamma * q - 1) P_Z (dr * M)
-            H = proj.sandwich(leaves, num_leaves, dr, self.gamma * q - 1)
+            # (dr * M)^T P_Z W P_Z (dr * M)
+            H = proj.sandwich(leaves, num_leaves, dr, weights)
             H += np.diag(counts)
 
             # Compute the 2nd order update
