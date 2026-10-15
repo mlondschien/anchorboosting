@@ -76,8 +76,8 @@ class AnchorBooster:
     ----------
     gamma: float
         The :math:`\\gamma` parameter for the anchor objective function. Must be
-        non-negative. If 1, the objective is equivalent to a standard regression or
-        probit classification objective.
+        non-negative. If 1 and ``alpha_cvar=1``, this is standard regression or
+        probit classification.
         Larger values correspond to more causal regularization.
     dataset_params: dict or None
         The parameters for the LightGBM dataset. See LightGBM documentation for details.
@@ -91,6 +91,8 @@ class AnchorBooster:
     learning_rate: float, optional, default=0.1
         The learning rate for the boosting. This is the :math:`\\mathrm{lr}` in the
         second order optimization step. It controls the step size of the updates.
+    alpha_cvar: float, optional, default=1.0
+        Tail fraction in (0, 1].
     **kwargs: dict
         Additional parameters for the LightGBM model. See LightGBM documentation for
         details. We suggest reducing the tree's complexity by reducing ``max_depth`` or
@@ -121,9 +123,11 @@ class AnchorBooster:
         num_boost_round=100,
         objective="regression",
         learning_rate=0.1,
+        alpha_cvar=1.0,
         **kwargs,
     ):
         self.gamma = gamma
+        self.alpha_cvar = alpha_cvar
         kwargs["learning_rate"] = learning_rate
         kwargs["objective"] = "none"
 
@@ -158,6 +162,10 @@ class AnchorBooster:
         -------
         self : AnchorBooster
         """
+        if not 0 < self.alpha_cvar <= 1:
+            raise ValueError("alpha_cvar must be in (0, 1].")
+        if self.alpha_cvar < 1 and (self.objective != "regression" or Z is None):
+            raise ValueError("CVaR requires regression with supplied anchors.")
         if self.objective != "regression" and not np.isin(y, [0, 1]).all():
             raise ValueError("For binary classification, y values must be in {0, 1}.")
 
@@ -231,7 +239,22 @@ class AnchorBooster:
                 ddr = (f**2 - 1) * r - 3 * f * r**2 + 2 * r**3  # d^3/df^3 loss
 
             r_proj = proj(r)
-            grad = r + (self.gamma - 1) * r_proj * dr
+
+            if self.alpha_cvar < 1:
+                scores = r_proj**2
+                cutoff = np.quantile(scores, 1 - self.alpha_cvar, method="inverted_cdf")
+                q = (scores > cutoff) / self.alpha_cvar
+                # Share the remaining tail mass equally among boundary ties.
+                ties = scores == cutoff
+                q[ties] = np.clip(
+                    (len(y) - q.sum()) / ties.sum(), 0, 1 / self.alpha_cvar
+                )
+                r_weighted = proj((self.gamma * q - 1) * r_proj)
+            else:
+                q = 1
+                r_weighted = (self.gamma - 1) * r_proj
+
+            grad = r + r_weighted * dr
 
             # We wish to fit one additional tree. Intuitively, one would use
             # is_finished = self.booster_.update(fobj=self.objective.objective)
@@ -318,7 +341,7 @@ class AnchorBooster:
                 leaves = leaf_values_argsort[leaves]
 
             # We wish to do 2nd order updates in the leaves. Since the anchor regression
-            # objective is quadratic, for regression a 2nd order update is equal to the
+            # objective is quadratic for fixed q, a 2nd order update is equal to the
             # global minimizer.
             # Let M be the one-hot encoding of the tree's leaf assignments. That is,
             # M[i, j] = 1 if leaves[i] == j else 0.
@@ -341,18 +364,19 @@ class AnchorBooster:
             # M^T diag(x) M = diag(np.bincount(leaves, weights=x))
             counts = np.bincount(
                 leaves,
-                weights=dr + (self.gamma - 1) * r_proj * ddr,
+                weights=dr + r_weighted * ddr,
                 minlength=num_leaves,
             )
             counts += self.params.get("lambda_l2", 0)
             counts[counts == 0] = 1  # counts==0 should never happen.
 
-            # (dr * M)^T P_Z (dr * M)
-            H = (self.gamma - 1) * proj.sandwich(leaves, num_leaves, weights=dr)
+            # (dr * M)^T P_Z diag(gamma * q - 1) P_Z (dr * M)
+            H = proj.sandwich(leaves, num_leaves, dr, self.gamma * q - 1)
             H += np.diag(counts)
 
             # Compute the 2nd order update
-            leaf_values = -np.linalg.solve(H, g) * self.params.get("learning_rate", 0.1)
+            leaf_values = -np.linalg.lstsq(H, g, rcond=1e-12)[0]
+            leaf_values *= self.params.get("learning_rate", 0.1)
 
             for ldx, val in enumerate(leaf_values):
                 self.booster_.set_leaf_output(idx, ldx, val)
@@ -552,9 +576,10 @@ class Proj:
         elif self._type == "linear":
             return self._Q @ (self._Q.T @ f)
 
-    def sandwich(self, leaves, num_leaves, weights):
+    def sandwich(self, leaves, num_leaves, scores, projection_weights=1):
         """
-        For M = weights * one_hot(leaves), return proj(Z, M).T @ proj(Z, M).
+        For M = scores * one_hot(leaves), return
+        proj(Z, M).T @ diag(projection_weights) @ proj(Z, M).
 
         Parameters
         ----------
@@ -562,21 +587,26 @@ class Proj:
             The leaf indices for each sample in `f`. Integers in [0, num_leaves).
         num_leaves: int
             The number of leaves in the decision tree.
-        weights: np.ndarray of shape (n,)
+        scores: np.ndarray of shape (n,)
             The input array to project.
+        projection_weights: float or np.ndarray of shape (n,), default=1
+            Row weights applied after projection.
 
         Returns
         -------
-        np.ndarray of shape (d, d)
+        np.ndarray of shape (num_leaves, num_leaves)
             The sandwich product.
         """
         if self._type == "none":
-            return np.zeros((num_leaves, num_leaves), dtype=weights.dtype)
+            return np.zeros((num_leaves, num_leaves), dtype=scores.dtype)
 
         elif self._type == "categorical":
-            S = np.zeros((self._n_categories, num_leaves), dtype=weights.dtype)
-            np.add.at(S, (self._Z, leaves), weights)
-            return (S * self._one_over_counts[:, np.newaxis]).T @ S
+            S = np.zeros((self._n_categories, num_leaves), dtype=scores.dtype)
+            np.add.at(S, (self._Z, leaves), scores)
+            if np.ndim(projection_weights):
+                projection_weights = np.bincount(self._Z, weights=projection_weights)
+                projection_weights *= self._one_over_counts
+            return (S * (self._one_over_counts * projection_weights)[:, None]).T @ S
 
         elif self._type == "linear":
             # M^T P_Z M = (M^T Q) @ (M^T Q)^T
@@ -584,11 +614,13 @@ class Proj:
             # version using a sparse matrix is faster.
             M = scipy.sparse.csr_matrix(
                 (
-                    weights,
+                    scores,
                     (np.arange(len(leaves)), leaves),
                 ),
                 shape=(len(leaves), num_leaves),
-                dtype=weights.dtype,
+                dtype=scores.dtype,
             )
             B = M.T @ self._Q
-            return B @ B.T
+            if np.ndim(projection_weights) == 0:
+                return projection_weights * (B @ B.T)
+            return B @ ((self._Q.T * projection_weights) @ self._Q) @ B.T
