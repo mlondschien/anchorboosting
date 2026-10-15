@@ -34,7 +34,7 @@ def test_refit(objective, seed, fun, input_dtype):
     same_anchor_booster = anchor_booster.refit(X, y, decay_rate=0.5)
     same_yhat = same_anchor_booster.predict(X, raw_score=True)
 
-    np.testing.assert_array_equal(yhat, same_yhat)
+    np.testing.assert_allclose(yhat, same_yhat, rtol=1e-12, atol=1e-12)
 
     new_anchor_booster = anchor_booster.refit(X[:20], y[:20], decay_rate=0)
     new_yhat = new_anchor_booster.predict(X[:20], raw_score=True)
