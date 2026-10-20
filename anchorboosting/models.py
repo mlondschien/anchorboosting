@@ -283,7 +283,7 @@ class AnchorBooster:
             # criteria. c.f. https://github.com/microsoft/LightGBM/pull/6890
             # The hessian is used only for the `min_hessian_in_leaf` parameter to
             # avoid numerical instabilities.
-            is_finished = self.booster_._Booster__boost(grad, dr)
+            is_finished = self.booster_._Booster__boost(grad=grad, hess=dr)
 
             if is_finished:
                 logger.info(f"Finished training after {idx} iterations.")
@@ -316,7 +316,7 @@ class AnchorBooster:
 
             # The _Booster__inner_predict(0) checks if __inner_predict_buffer[0] is None
             self.booster_._Booster__inner_predict_buffer = [None]
-            booster_preds_new = self.booster_._Booster__inner_predict(0)
+            booster_preds_new = self.booster_._Booster__inner_predict(data_idx=0)
 
             booster_preds_this_iter = booster_preds_new - booster_preds
             booster_preds = booster_preds_new
