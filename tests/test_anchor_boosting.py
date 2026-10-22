@@ -117,7 +117,7 @@ def test_anchor_boosting_decreases_loss(gamma, objective):
         dl = np.where(y == 1, -dp / p, dp / (1 - p))
 
         Pa_dl = a @ np.linalg.solve(a.T @ a, a.T @ dl)
-        return np.sum(losses) + (gamma - 1) * dl.T @ Pa_dl
+        return np.sum(losses) + (gamma - 1) / 2 * dl.T @ Pa_dl
 
     if objective == "regression":
         loss = regression_loss
