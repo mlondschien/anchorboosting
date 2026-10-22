@@ -24,10 +24,11 @@ class AnchorBooster:
     For regression, the anchor loss :cite:p:`rothenhausler2021anchor` with causal
     regularization parameter :math:`\\gamma` is
 
-    .. math:: \\ell(f, y) = \\frac{1}{2} \\| y - f \\|_2^2 + \\frac{1}{2} (\\gamma - 1) \\|P_A (y - f) \\|_2^2,
+    .. math:: \\ell(f, y) = \\frac{1}{2n} \\| M_A (y - f) \\|_2^2 + \\frac{\\gamma}{2} \\operatorname{CVaR}_{\\alpha}((P_A (y - f))^2),
 
     where :math:`P_A = A (A^T A)^{-1} A^T` is the linear projection onto the anchor
-    :math:`A`'s column space .
+    :math:`A`'s column space and :math:`\\operatorname{CVaR}_{\\alpha}` is the
+    conditional value at risk.
 
     Let :math:`\\Phi` and :math:`\\varphi` be cumulative distribution function and
     probability density function of the Gaussian distribution.
@@ -75,7 +76,8 @@ class AnchorBooster:
     ----------
     gamma: float
         The :math:`\\gamma` parameter for the anchor objective function. Must be
-        non-negative for regression and at least 1 for probit classification.
+        non-negative. For probit classification, must be at
+        least 1.
         If 1, probit is unpenalized; regression also requires ``alpha_cvar=1``.
         Larger values correspond to more causal regularization.
     dataset_params: dict or None
@@ -258,7 +260,7 @@ class AnchorBooster:
 
             weights = scale * q - offset
             r_weighted = weights * r_proj
-            if self.alpha_cvar and proj._type == "linear":
+            if self.alpha_cvar < 1 and proj._type == "linear":
                 r_weighted = proj(r_weighted)
 
             grad = r + r_weighted * dr

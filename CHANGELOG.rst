@@ -1,7 +1,7 @@
 Changelog
 =========
 
-0.4.0 (2025-10-15)
+0.4.0 (2026-10-15)
 ------------------
 
 - Added CVaR anchor boosting. See Londschien (2026) "CVaR Anchor Boosting protects against rare shifts" for details.
